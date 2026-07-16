@@ -44,7 +44,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
     case 'element-add': {
       const { pageIndex, element } = operation
       if (!updated[pageIndex]) return pages
-      updated[pageIndex] = { ...updated[pageIndex], elements: [...updated[pageIndex].elements, element] }
+      updated[pageIndex] = { ...updated[pageIndex], elements: [...(updated[pageIndex].elements ?? []), element] }
       return updated
     }
     case 'element-update': {
@@ -52,7 +52,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
       if (!updated[pageIndex]) return pages
       updated[pageIndex] = {
         ...updated[pageIndex],
-        elements: updated[pageIndex].elements.map(el =>
+        elements: (updated[pageIndex].elements ?? []).map(el =>
           el.id === elementId ? { ...el, ...patch, data: { ...el.data, ...patch.data } } : el
         ),
       }
@@ -63,21 +63,22 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
       if (!updated[pageIndex]) return pages
       updated[pageIndex] = {
         ...updated[pageIndex],
-        elements: updated[pageIndex].elements.filter(el => el.id !== elementId),
+        elements: (updated[pageIndex].elements ?? []).filter(el => el.id !== elementId),
       }
       return updated
     }
     case 'element-move': {
       const { elementId, fromPage, toPage, x, y } = operation
       if (!updated[fromPage] || !updated[toPage]) return pages
-      const el = updated[fromPage].elements.find(e => e.id === elementId)
+      const el = (updated[fromPage].elements ?? []).find(e => e.id === elementId)
       if (!el) return pages
-      updated[fromPage] = { ...updated[fromPage], elements: updated[fromPage].elements.filter(e => e.id !== elementId) }
-      updated[toPage] = { ...updated[toPage], elements: [...updated[toPage].elements, { ...el, x, y }] }
+      updated[fromPage] = { ...updated[fromPage], elements: (updated[fromPage].elements ?? []).filter(e => e.id !== elementId) }
+      updated[toPage] = { ...updated[toPage], elements: [...(updated[toPage].elements ?? []), { ...el, x, y }] }
       return updated
     }
     case 'page-add': {
-      return [...updated, ...operation.pages]
+      const sanitized = operation.pages.map(p => ({ ...p, elements: p.elements ?? [] }))
+      return [...updated, ...sanitized]
     }
     case 'page-update': {
       const { pageIndex, patch } = operation
@@ -88,7 +89,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
     case 'page-elements-replace': {
       const { pageIndex, elements } = operation
       if (!updated[pageIndex]) return pages
-      updated[pageIndex] = { ...updated[pageIndex], elements }
+      updated[pageIndex] = { ...updated[pageIndex], elements: elements ?? [] }
       return updated
     }
     case 'page-clear': {

@@ -16,6 +16,18 @@ function sanitizePages(pages: Page[]): Page[] {
   return pages.map(p => ({ ...p, elements: p.elements ?? [] }))
 }
 
+function deduplicatePageElements(pages: Page[]): Page[] {
+  const seen = new Set<string>()
+  return pages.map(page => ({
+    ...page,
+    elements: page.elements.filter(el => {
+      if (seen.has(el.id)) return false
+      seen.add(el.id)
+      return true
+    })
+  }))
+}
+
 function loadPagesFromStorage(): Page[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_PAGES)
@@ -94,6 +106,7 @@ interface JournalContextType {
   addElement: (element: Omit<CanvasElement, 'id' | 'zIndex'>, pageIdx?: number) => string
   updateElement: (id: string, updates: Partial<CanvasElement>, syncEnabled?: boolean, pageIdx?: number) => void
   deleteElement: (id: string, pageIdx?: number) => void
+  deleteElements: (ids: string[], pageIdx?: number) => void
   replacePageElements: (elements: CanvasElement[]) => void
   clearPage: () => void
   bringForward: (id: string, pageIdx?: number) => void
@@ -280,9 +293,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!sync.loading && sync.pages.length > 0) {
       console.log('[JournalContext] loading', sync.pages.length, 'pages from BroadcastChannel peer')
       initializedRef.current = true
+      const cleaned = deduplicatePageElements(sanitizePages(sync.pages))
       // eslint-disable-next-line react-hooks/set-state-in-effect -- sync external state into React
-      setPages(sanitizePages(sync.pages))
-      savePagesToStorage(sanitizePages(sync.pages))
+      setPages(cleaned)
+      savePagesToStorage(cleaned)
     } else if (!sync.loading) {
       console.log('[JournalContext] No peer data yet, keeping localStorage')
       initializedRef.current = true
@@ -293,7 +307,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!initializedRef.current) return
     if (sync.pages.length === 0) return
-    const incoming = sanitizePages(sync.pages)
+    const incoming = deduplicatePageElements(sanitizePages(sync.pages))
     if (pagesRef.current.length !== incoming.length) {
       setPages(incoming)
     } else {
@@ -302,9 +316,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         const a = pagesRef.current[i]
         const b = incoming[i]
         if (a.background !== b.background || a.pattern !== b.pattern) changed = true
-        if (a.elements.length !== b.elements.length) changed = true
+        if ((a.elements?.length ?? 0) !== (b.elements?.length ?? 0)) changed = true
         if (!changed) {
-          for (let j = 0; j < a.elements.length && !changed; j++) {
+          for (let j = 0; j < (a.elements?.length ?? 0) && !changed; j++) {
             const ea = a.elements[j]
             const eb = b.elements[j]
             if (ea.x !== eb.x || ea.y !== eb.y || ea.width !== eb.width || ea.height !== eb.height) changed = true
@@ -317,13 +331,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to sync.pages changes
   }, [sync.pages])
 
-  const [anniversaryDate, setAnniversaryDate] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).anniversaryDate)
-  const [milestones, setMilestones] = useState<Milestone[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).milestones)
-  const [occasions, setOccasions] = useState<Occasion[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).occasions)
-  const [journeyDetails, setJourneyDetails] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).journeyDetails)
+  const [anniversaryDate, setAnniversaryDate] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).anniversaryDate ?? getDefaultMetadata().anniversaryDate)
+  const [milestones, setMilestones] = useState<Milestone[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).milestones ?? getDefaultMetadata().milestones)
+  const [occasions, setOccasions] = useState<Occasion[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).occasions ?? getDefaultMetadata().occasions)
+  const [journeyDetails, setJourneyDetails] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).journeyDetails ?? getDefaultMetadata().journeyDetails)
 
   const metadataChannelRef = useRef<BroadcastChannel | null>(null)
   const metadataReceiveRef = useRef(false)
+  const firebaseMetaReceiveRef = useRef(false)
 
   useEffect(() => {
     const channel = new BroadcastChannel('journal-metadata')
@@ -332,28 +347,43 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const meta = e.data as JournalMetadata
       metadataReceiveRef.current = true
       setAnniversaryDate(meta.anniversaryDate)
-      setMilestones(meta.milestones)
-      setOccasions(meta.occasions)
-      setJourneyDetails(meta.journeyDetails)
+      setMilestones(meta.milestones ?? getDefaultMetadata().milestones)
+      setOccasions(meta.occasions ?? getDefaultMetadata().occasions)
+      setJourneyDetails(meta.journeyDetails ?? getDefaultMetadata().journeyDetails)
       saveMetadataToStorage(meta)
     }
     return () => channel.close()
   }, [])
 
-  // Broadcast metadata changes (skip if just received from another tab)
+  // Broadcast metadata changes (skip if just received from another tab or Firebase)
   const metaPrevRef = useRef<string>('')
   useEffect(() => {
-    const meta: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
+    const meta: JournalMetadata = { anniversaryDate, milestones: milestones ?? [], occasions: occasions ?? [], journeyDetails }
     const key = JSON.stringify(meta)
     if (key === metaPrevRef.current) return
     metaPrevRef.current = key
-    if (metadataReceiveRef.current) {
+    if (metadataReceiveRef.current || firebaseMetaReceiveRef.current) {
       metadataReceiveRef.current = false
+      firebaseMetaReceiveRef.current = false
       return
     }
     metadataChannelRef.current?.postMessage(meta)
     saveMetadataToStorage(meta)
-  }, [anniversaryDate, milestones, occasions, journeyDetails])
+    sync.saveMetadata(meta)
+  }, [anniversaryDate, milestones, occasions, journeyDetails, sync])
+
+  // Apply incoming metadata from Firebase (other users)
+  useEffect(() => {
+    if (!sync.metadata) return
+    const current: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
+    if (JSON.stringify(current) === JSON.stringify(sync.metadata)) return
+    firebaseMetaReceiveRef.current = true
+    setAnniversaryDate(sync.metadata.anniversaryDate)
+    setMilestones(sync.metadata.milestones ?? getDefaultMetadata().milestones)
+    setOccasions(sync.metadata.occasions ?? getDefaultMetadata().occasions)
+    setJourneyDetails(sync.metadata.journeyDetails ?? getDefaultMetadata().journeyDetails)
+    saveMetadataToStorage(sync.metadata)
+  }, [sync.metadata])
 
   const [currentPageIndex, setCurrentPageIndex] = useState(0)
   const [focusPageIndex, setFocusPageIndexState] = useState(0)
@@ -437,6 +467,20 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       return updated
     })
     sync.broadcastOperation({ type: 'element-delete', pageIndex: idx, elementId: id })
+  }, [savePages, sync.broadcastOperation])
+
+  const deleteElements = useCallback((ids: string[], pageIdx?: number) => {
+    const idx = pageIdx ?? focusPageIndexRef.current
+    const idSet = new Set(ids)
+    savePages(prev => {
+      const updated = [...prev]
+      updated[idx] = {
+        ...updated[idx],
+        elements: updated[idx].elements.filter(el => !idSet.has(el.id)),
+      }
+      return updated
+    })
+    ids.forEach(id => sync.broadcastOperation({ type: 'element-delete', pageIndex: idx, elementId: id }))
   }, [savePages, sync.broadcastOperation])
 
   const bringForward = useCallback((id: string, pageIdx?: number) => {
@@ -634,7 +678,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       value={{
         pages, bookClosed, setBookClosed, currentPageIndex, setCurrentPageIndex,
         focusPageIndex, setFocusPageIndex, getFocusPageIndex, transferElement,
-        addElement, updateElement, deleteElement, replacePageElements, clearPage,
+        addElement, updateElement, deleteElement, deleteElements, replacePageElements, clearPage,
         bringForward, sendBackward, updatePageBackground, updateAllPagesBackground, updatePagePattern, updateAllPagesPattern, updateGridSize, updateAllPagesGridSize, addPage,
         users, currentUser,
         remoteCursors: cursors, updateCursorPosition,
@@ -649,7 +693,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         isAuthenticated, authLoading, authError, signInWithGoogle, signInAnonymously, signOut,
         syncLoading, isConnected: sync.isConnected,
         syncLatency, syncPeakLatency,
-        flushSync: () => { sync.savePages(sanitizePages(pagesRef.current)); sync.flushPages() },
+        flushSync: () => { sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current))); sync.flushPages() },
         saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints,
       }}
     >
