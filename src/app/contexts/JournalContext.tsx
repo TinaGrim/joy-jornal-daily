@@ -53,13 +53,7 @@ function saveMetadataToStorage(meta: JournalMetadata) {
 function getDefaultMetadata(): JournalMetadata {
   return {
     anniversaryDate: '16.11.2025',
-    milestones: [
-      { id: 'ms-first-photo', label: 'First Photo Added', emoji: '📸', done: false },
-      { id: 'ms-five-pages', label: '5 Pages Complete', emoji: '⭐', done: false },
-      { id: 'ms-drew-together', label: 'Drew Together', emoji: '🎨', done: false },
-      { id: 'ms-first-sticker', label: 'Sticker Lover', emoji: '✨', done: false },
-      { id: 'ms-first-emoji', label: 'Emoji Master', emoji: '😊', done: false },
-    ],
+    milestones: [],
     occasions: [],
     journeyDetails: {
       title: 'Summer Road Trip',
