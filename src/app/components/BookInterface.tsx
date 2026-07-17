@@ -54,8 +54,16 @@ export default function BookInterface(_props: Record<string, unknown>) {
 
   const handleOpen = () => {
     setBookClosed(false)
-    setCurrentPageIndex(1)
-    setFocusPageIndex(1)
+    if (pages.length < 3) {
+      addPage()
+      setTimeout(() => {
+        setCurrentPageIndex(1)
+        setFocusPageIndex(1)
+      }, 0)
+    } else {
+      setCurrentPageIndex(1)
+      setFocusPageIndex(1)
+    }
   }
 
   const handlePrev = useCallback(() => {
@@ -80,7 +88,7 @@ export default function BookInterface(_props: Record<string, unknown>) {
       return
     }
     const nextIdx = currentPageIndex + 2
-    if (nextIdx < pages.length) {
+    if (nextIdx + 1 < pages.length) {
       setCurrentPageIndex(nextIdx)
       setFocusPageIndex(nextIdx)
     } else {
@@ -260,7 +268,7 @@ export default function BookInterface(_props: Record<string, unknown>) {
                 }}
               >
                 <ForeEdgePage side="left" />
-                <Canvas page={pages[currentPageIndex - 1]} pageIndex={currentPageIndex - 1} side="left" />
+                <Canvas page={pages[currentPageIndex]} pageIndex={currentPageIndex} side="left" />
                 <BottomPageEdge />
                 <VintageCorners side="left" />
                 <VintageVignette side="left" />
@@ -294,7 +302,7 @@ export default function BookInterface(_props: Record<string, unknown>) {
                   boxShadow: 'inset 12px 0 16px -12px rgba(139,115,85,0.25), inset -4px 0 8px -4px rgba(255,255,255,0.4)',
                 }}
               >
-                <Canvas page={pages[currentPageIndex]} pageIndex={currentPageIndex} side="right" />
+                <Canvas page={pages[currentPageIndex + 1]} pageIndex={currentPageIndex + 1} side="right" />
                 <ForeEdgePage side="right" />
                 <BottomPageEdge />
                 <VintageCorners side="right" />

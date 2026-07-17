@@ -331,6 +331,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to sync.pages changes
   }, [sync.pages])
 
+  const hadLocalMetadataRef = useRef(!!loadMetadataFromStorage())
+
   const [anniversaryDate, setAnniversaryDate] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).anniversaryDate ?? getDefaultMetadata().anniversaryDate)
   const [milestones, setMilestones] = useState<Milestone[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).milestones ?? getDefaultMetadata().milestones)
   const [occasions, setOccasions] = useState<Occasion[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).occasions ?? getDefaultMetadata().occasions)
@@ -339,12 +341,16 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const metadataChannelRef = useRef<BroadcastChannel | null>(null)
   const metadataReceiveRef = useRef(false)
   const firebaseMetaReceiveRef = useRef(false)
+  const deviceIdRef = useRef(`meta-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
 
   useEffect(() => {
     const channel = new BroadcastChannel('journal-metadata')
     metadataChannelRef.current = channel
     channel.onmessage = (e) => {
-      const meta = e.data as JournalMetadata
+      const msg = e.data as JournalMetadata & { _senderId?: string }
+      // Ignore self-received messages to avoid flag pollution
+      if (msg._senderId === deviceIdRef.current) return
+      const meta = msg
       metadataReceiveRef.current = true
       setAnniversaryDate(meta.anniversaryDate)
       setMilestones(meta.milestones ?? getDefaultMetadata().milestones)
@@ -362,13 +368,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const key = JSON.stringify(meta)
     if (key === metaPrevRef.current) return
     metaPrevRef.current = key
+    // Always persist to localStorage first, even if broadcast is skipped by guards
+    saveMetadataToStorage(meta)
     if (metadataReceiveRef.current || firebaseMetaReceiveRef.current) {
       metadataReceiveRef.current = false
       firebaseMetaReceiveRef.current = false
       return
     }
-    metadataChannelRef.current?.postMessage(meta)
-    saveMetadataToStorage(meta)
+    metadataChannelRef.current?.postMessage({ ...meta, _senderId: deviceIdRef.current })
     sync.saveMetadata(meta)
   }, [anniversaryDate, milestones, occasions, journeyDetails, sync])
 
@@ -377,6 +384,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!sync.metadata) return
     const current: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
     if (JSON.stringify(current) === JSON.stringify(sync.metadata)) return
+    // If local metadata was loaded from localStorage, don't let Firebase overwrite with defaults
+    if (hadLocalMetadataRef.current && JSON.stringify(sync.metadata) === JSON.stringify(getDefaultMetadata())) return
     firebaseMetaReceiveRef.current = true
     setAnniversaryDate(sync.metadata.anniversaryDate)
     setMilestones(sync.metadata.milestones ?? getDefaultMetadata().milestones)

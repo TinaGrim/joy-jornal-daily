@@ -81,9 +81,9 @@ interface CanvasProps {
 }
 
 export default function Canvas({ page, pageIndex, side }: CanvasProps) {
-  const { addElement, updateElement, deleteElement, transferElement, currentPageIndex, drawSettings, setDrawSettings, setSelectedElementId, setSelectedElementIds, setFocusPageIndex } = useJournal()
+  const { addElement, updateElement, deleteElement, deleteElements, transferElement, currentPageIndex, drawSettings, setDrawSettings, setSelectedElementId, setSelectedElementIds, setFocusPageIndex } = useJournal()
   const canvasRef = useRef<HTMLDivElement>(null)
-  const isActive = pageIndex === currentPageIndex || pageIndex === currentPageIndex - 1
+  const isActive = pageIndex === currentPageIndex || pageIndex === currentPageIndex + 1
   const [drawingPath, setDrawingPath] = useState<string | null>(null)
   const isDrawingRef = useRef(false)
   const drawingPathRef = useRef<string | null>(null)
@@ -153,8 +153,8 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
   const getCanvasPos = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect()
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (e.clientX - rect.left) / rect.width * 640,
+      y: (e.clientY - rect.top) / rect.height * 860,
     }
   }, [isActive])
 
@@ -258,7 +258,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
               if (el.x >= eraserBbox.x && el.x + el.width <= eraserBbox.x + eraserBbox.w && el.y >= eraserBbox.y && el.y + el.height <= eraserBbox.y + eraserBbox.h) return true
               return false
             })
-          toRemove.forEach(el => deleteElement(el.id, pageIndex))
+          toRemove.length && deleteElements(toRemove.map(el => el.id), pageIndex)
         } else {
           addElement({
             type: 'drawing',
@@ -279,7 +279,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     }
     setDrawingPath(null)
     setSelectedElementId(null)
-  }, [isActive, drawSettings, addElement, deleteElement, page.elements, pageIndex, setSelectedElementId, setSelectedElementIds, setDrawSettings])
+  }, [isActive, drawSettings, addElement, deleteElement, deleteElements, page.elements, pageIndex, setSelectedElementId, setSelectedElementIds, setDrawSettings])
 
   return (
     <div
