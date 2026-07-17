@@ -270,9 +270,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
   )
 
   const saveMetadata = useCallback((newMetadata: JournalMetadata) => {
-    setMetadata(newMetadata)
     syncRef.current?.setMetadata(newMetadata)
-    syncRef.current?.broadcastMetadata(newMetadata)
     fbSyncRef.current?.broadcastMetadata(newMetadata)
   }, [])
 
