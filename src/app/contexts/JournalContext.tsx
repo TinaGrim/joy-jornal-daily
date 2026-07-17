@@ -361,22 +361,23 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     return () => channel.close()
   }, [])
 
-  // Broadcast metadata changes (skip if just received from another tab or Firebase)
+  // Broadcast metadata changes (skip cross-tab broadcast if just received from another source)
   const metaPrevRef = useRef<string>('')
   useEffect(() => {
     const meta: JournalMetadata = { anniversaryDate, milestones: milestones ?? [], occasions: occasions ?? [], journeyDetails }
     const key = JSON.stringify(meta)
     if (key === metaPrevRef.current) return
     metaPrevRef.current = key
-    // Always persist to localStorage first, even if broadcast is skipped by guards
+    // Always persist to localStorage and Firebase
     saveMetadataToStorage(meta)
+    sync.saveMetadata(meta)
+    // Only broadcast to other tabs if not received from another source
     if (metadataReceiveRef.current || firebaseMetaReceiveRef.current) {
       metadataReceiveRef.current = false
       firebaseMetaReceiveRef.current = false
       return
     }
     metadataChannelRef.current?.postMessage({ ...meta, _senderId: deviceIdRef.current })
-    sync.saveMetadata(meta)
   }, [anniversaryDate, milestones, occasions, journeyDetails, sync])
 
   // Apply incoming metadata from Firebase (other users)
