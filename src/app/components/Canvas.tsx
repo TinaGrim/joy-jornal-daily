@@ -285,8 +285,8 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     <div
       ref={node => { canvasRef.current = node; drop(node) }}
       data-page-index={pageIndex}
-      className={`w-full h-full relative overflow-visible select-none touch-none ${side === 'left' ? 'rounded-s-2xl' : side === 'right' ? 'rounded-e-2xl' : ''}`}
-      style={{ background: page.background }}
+      className={`w-full h-full relative z-10 overflow-visible select-none touch-none ${side === 'left' ? 'rounded-s-2xl' : side === 'right' ? 'rounded-e-2xl' : ''}`}
+      style={{ background: page.background, touchAction: 'none' as const }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -326,6 +326,12 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
         .map(element => (
           <DraggableElement key={element.id} element={element} isActive={isActive} pageIndex={pageIndex} />
         ))}
+
+      {(page.elements ?? []).filter(el => !el.data?._deleted).length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 select-none">
+          <span className="text-[#a89a8a]/40 font-handwriting text-xl tracking-wide">Tap to start creating</span>
+        </div>
+      )}
 
       {drawingPath && drawSettings.active && (
         <svg

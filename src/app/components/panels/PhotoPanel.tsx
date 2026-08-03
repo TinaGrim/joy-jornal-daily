@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
+import { useTheme } from '../../contexts/ThemeContext'
+import { useJournal } from '../../contexts/JournalContext'
 import { Upload, ImageIcon, Camera } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -19,7 +21,7 @@ interface UploadedPhoto {
   name: string
 }
 
-function PhotoThumbnail({ photo, mask }: { photo: UploadedPhoto; mask: ShapeMask }) {
+function PhotoThumbnail({ photo, mask, isDark }: { photo: UploadedPhoto; mask: ShapeMask; isDark: boolean }) {
   const { isDragging, drag } = useToolDrag({
     elementType: 'image',
     data: { src: photo.src, mask },
@@ -31,7 +33,8 @@ function PhotoThumbnail({ photo, mask }: { photo: UploadedPhoto; mask: ShapeMask
     <div
       ref={drag}
       className={cn(
-        'group relative rounded-xl overflow-hidden border-2 border-border-light cursor-grab active:cursor-grabbing transition-all hover:shadow-lg hover:border-terracotta/40 hover:-translate-y-0.5',
+        'group relative rounded-xl overflow-hidden border-2 cursor-grab active:cursor-grabbing transition-all hover:shadow-lg hover:-translate-y-0.5',
+        isDark ? 'border-[#45475a] hover:border-terracotta/40' : 'border-border-light hover:border-terracotta/40',
         isDragging && 'opacity-50',
       )}
     >
@@ -40,7 +43,7 @@ function PhotoThumbnail({ photo, mask }: { photo: UploadedPhoto; mask: ShapeMask
       <div className="absolute bottom-0 left-0 right-0 p-1.5 text-xs text-white bg-gradient-to-t from-black/60 to-transparent truncate font-handwriting">
         {photo.name}
       </div>
-      <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-white/80 backdrop-blur-xs rounded text-[10px] text-warm-brown font-handwriting capitalize">
+      <div className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 backdrop-blur-xs rounded text-[12px] font-handwriting capitalize ${isDark ? 'bg-[#313244]/80 text-[#a6adc8]' : 'bg-white/80 text-warm-brown'}`}>
         {mask}
       </div>
     </div>
@@ -48,9 +51,11 @@ function PhotoThumbnail({ photo, mask }: { photo: UploadedPhoto; mask: ShapeMask
 }
 
 export default function PhotoPanel() {
-  const [photos, setPhotos] = useState<UploadedPhoto[]>([])
+  const { uploadedPhotos: photos, addUploadedPhotos } = useJournal()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [selectedMask, setSelectedMask] = useState<ShapeMask>('rectangle')
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const handleUpload = () => {
     fileInputRef.current?.click()
@@ -59,28 +64,30 @@ export default function PhotoPanel() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-    Array.from(files).forEach(file => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader()
-        reader.onload = () => {
-          setPhotos(prev => [
-            ...prev,
-            { id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: reader.result as string, name: file.name },
-          ])
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
+    let loaded = 0
+    const newPhotos: UploadedPhoto[] = []
+    imageFiles.forEach(file => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        newPhotos.push({ id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: reader.result as string, name: file.name })
+        loaded++
+        if (loaded === imageFiles.length) {
+          addUploadedPhotos(newPhotos)
         }
-        reader.readAsDataURL(file)
       }
+      reader.readAsDataURL(file)
     })
     e.target.value = ''
   }
 
   return (
     <div className="space-y-6">
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
-        <p className="text-sm text-warm-brown mb-3 font-handwriting">Upload your travel photos</p>
+      <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
+        <p className={`text-sm mb-3 font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Upload your travel photos</p>
         <button
           onClick={handleUpload}
-          className="w-full py-3 px-4 rounded-xl border-2 border-dashed border-border-dark bg-white hover:bg-cream-dark hover:border-terracotta transition-all flex items-center justify-center gap-2 cursor-pointer font-handwriting text-warm-brown group"
+          className={`w-full py-3 px-4 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 cursor-pointer font-handwriting transition-all group ${isDark ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta hover:text-terracotta' : 'border-border-dark bg-white text-warm-brown hover:bg-cream-dark hover:border-terracotta hover:text-terracotta'}`}
         >
           <Upload className="w-5 h-5 group-hover:text-terracotta transition-colors" />
           <span className="group-hover:text-terracotta transition-colors">Upload Photo</span>
@@ -97,8 +104,8 @@ export default function PhotoPanel() {
 
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <Camera className="w-4 h-4 text-warm-brown" />
-          <p className="text-sm text-warm-brown font-handwriting">Photo Shape</p>
+          <Camera className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Photo Shape</p>
         </div>
         <div className="grid grid-cols-5 gap-1.5">
           {masks.map(m => (
@@ -109,29 +116,31 @@ export default function PhotoPanel() {
                 'py-2 px-1 rounded-lg border text-xs font-handwriting transition-all cursor-pointer',
                 selectedMask === m.id
                   ? 'border-terracotta bg-terracotta text-white shadow-sm'
-                  : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
+                  : isDark
+                    ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta/50 hover:bg-terracotta/10'
+                    : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
               )}
               title={m.desc}
             >
               <span className="block leading-tight">{m.label}</span>
-              <span className="block text-[9px] opacity-60 leading-tight mt-0.5">{m.desc}</span>
+              <span className="block text-[11px] opacity-60 leading-tight mt-0.5">{m.desc}</span>
             </button>
           ))}
         </div>
       </div>
 
       {photos.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-text-muted bg-cream rounded-xl border-2 border-dashed border-border-light">
+        <div className={`flex flex-col items-center justify-center py-12 rounded-xl border-2 border-dashed ${isDark ? 'text-[#6c7086] bg-[#181825] border-[#45475a]' : 'text-text-muted bg-cream border-border-light'}`}>
           <ImageIcon className="w-12 h-12 mb-3 opacity-30" />
           <p className="font-handwriting text-lg">No photos yet</p>
           <p className="font-handwriting text-sm opacity-60">Upload to get started</p>
         </div>
       ) : (
         <div>
-          <p className="text-sm text-warm-brown mb-3 font-handwriting">Drag a photo to the page</p>
+          <p className={`text-sm mb-3 font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Drag a photo to the page</p>
           <div className="grid grid-cols-2 gap-3">
             {photos.map(photo => (
-              <PhotoThumbnail key={photo.id} photo={photo} mask={selectedMask} />
+              <PhotoThumbnail key={photo.id} photo={photo} mask={selectedMask} isDark={isDark} />
             ))}
           </div>
         </div>

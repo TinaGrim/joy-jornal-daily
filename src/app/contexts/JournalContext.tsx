@@ -125,6 +125,8 @@ interface JournalContextType {
   occasions: Occasion[]
   addOccasion: (label: string, date: string, emoji?: string) => void
   deleteOccasion: (id: string) => void
+  uploadedPhotos: { id: string; src: string; name: string }[]
+  addUploadedPhotos: (photos: { id: string; src: string; name: string }[]) => void
   drawSettings: DrawSettings
   setDrawSettings: (settings: DrawSettings) => void
   selectedElementId: string | null
@@ -408,6 +410,11 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     strokeWidth: 3,
   })
 
+  const [uploadedPhotos, setUploadedPhotos] = useState<{ id: string; src: string; name: string }[]>([])
+  const addUploadedPhotos = useCallback((newPhotos: { id: string; src: string; name: string }[]) => {
+    setUploadedPhotos(prev => [...prev, ...newPhotos])
+  }, [])
+
   const getFocusPageIndex = useCallback(() => focusPageIndexRef.current, [])
 
   const storageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -690,6 +697,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         milestones, addMilestone, toggleMilestone, deleteMilestone,
         occasions, addOccasion, deleteOccasion,
         drawSettings, setDrawSettings,
+        uploadedPhotos, addUploadedPhotos,
         selectedElementId, setSelectedElementId,
         selectedElementIds, setSelectedElementIds, batchUpdateElements,
         journeyDetails, setJourneyDetails,
