@@ -7,6 +7,8 @@ import type { CheckpointInfo } from '@/lib/firebaseSync'
 import { useFirebaseAuth } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
 
+const BACKUP_VERSION = 1
+
 const STORAGE_KEY_PAGES = 'journal_pages'
 const STORAGE_KEY_METADATA = 'journal_metadata'
 const STORAGE_KEY_UID = 'journal_anon_uid'
@@ -154,6 +156,7 @@ interface JournalContextType {
   refreshCheckpoints: () => Promise<void>
   syncLatency: number
   syncPeakLatency: number
+  exportBackup: () => Promise<void>
 }
 
 const JournalContext = createContext<JournalContextType | undefined>(undefined)
@@ -359,6 +362,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
 
   // Broadcast metadata changes (skip cross-tab broadcast if just received from another source)
   const metaPrevRef = useRef<string>('')
+  const syncSaveMetadataRef = useRef(sync.saveMetadata)
+  useEffect(() => { syncSaveMetadataRef.current = sync.saveMetadata }, [sync.saveMetadata])
   useEffect(() => {
     const meta: JournalMetadata = { anniversaryDate, milestones: milestones ?? [], occasions: occasions ?? [], journeyDetails }
     const key = JSON.stringify(meta)
@@ -366,7 +371,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     metaPrevRef.current = key
     // Always persist to localStorage and Firebase
     saveMetadataToStorage(meta)
-    sync.saveMetadata(meta)
+    syncSaveMetadataRef.current(meta)
     // Only broadcast to other tabs if not received from another source
     if (metadataReceiveRef.current || firebaseMetaReceiveRef.current) {
       metadataReceiveRef.current = false
@@ -374,7 +379,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       return
     }
     metadataChannelRef.current?.postMessage({ ...meta, _senderId: deviceIdRef.current })
-  }, [anniversaryDate, milestones, occasions, journeyDetails, sync])
+  }, [anniversaryDate, milestones, occasions, journeyDetails])
 
   // Apply incoming metadata from Firebase (other users)
   useEffect(() => {
@@ -684,6 +689,40 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     setOccasions(prev => prev.filter(o => o.id !== id))
   }, [])
 
+  const exportBackup = useCallback(async () => {
+    const meta: JournalMetadata = {
+      anniversaryDate,
+      milestones: milestones ?? [],
+      occasions: occasions ?? [],
+      journeyDetails,
+    }
+    const checkpointsList = await sync.getHistory()
+    const checkpointData: Record<string, Page[]> = {}
+    for (const cp of checkpointsList) {
+      const data = await sync.loadCheckpoint(cp.id)
+      if (data) checkpointData[cp.id] = data
+    }
+    const backup = {
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      pages: pagesRef.current,
+      metadata: meta,
+      checkpoints: checkpointData,
+      checkpointMeta: checkpointsList,
+    }
+    const json = JSON.stringify(backup, null, 2)
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `journey-backup-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.success('Backup downloaded!')
+  }, [anniversaryDate, milestones, occasions, journeyDetails, sync.getHistory, sync.loadCheckpoint])
+
   return (
     <JournalContext.Provider
       value={{
@@ -707,6 +746,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         syncLatency, syncPeakLatency,
         flushSync: () => { sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current))); sync.flushPages() },
         saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints,
+        exportBackup,
       }}
     >
       {children}
