@@ -73,17 +73,17 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
   }
 
   return (
-    <div className="fixed left-0 top-0 h-full z-30">
+    <div className={`fixed left-0 top-0 h-full z-30 ${open ? '' : 'pointer-events-none'}`}>
       {open && (
         <div
-          className="fixed inset-0 bg-black/40 z-20 md:hidden"
+          className="fixed inset-0 bg-black/40 z-20 md:hidden pointer-events-auto"
           onClick={onToggle}
         />
       )}
       <motion.div
         animate={{ x: open ? 0 : -288 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className="relative h-full shadow-lg flex flex-col"
+        className={`relative h-full shadow-lg flex flex-col ${open ? 'pointer-events-auto' : ''}`}
         style={{
           width: 288,
           background: isDark ? '#1e1e2e' : '#f0e6d3',
@@ -346,7 +346,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
       <button
         type="button"
         onClick={onToggle}
-        className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-r-md shadow-sm z-30 transition-colors cursor-pointer"
+        className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-r-md shadow-sm z-30 transition-colors cursor-pointer pointer-events-auto"
         style={{
           left: open ? 288 : 0,
           transition: 'left 0.25s ease-in-out',

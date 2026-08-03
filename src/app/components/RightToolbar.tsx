@@ -95,10 +95,10 @@ export default function RightToolbar() {
   }
 
   return (
-    <div ref={containerRef} className="fixed right-0 top-0 h-full z-30">
+    <div ref={containerRef} className={`fixed right-0 top-0 h-full z-30 ${open ? '' : 'pointer-events-none'}`}>
       {open && (
         <div
-          className="fixed inset-0 bg-black/40 z-20 md:hidden"
+          className="fixed inset-0 bg-black/40 z-20 md:hidden pointer-events-auto"
           onClick={() => { setActivePanel(null); setOpen(false) }}
         />
       )}
@@ -106,7 +106,7 @@ export default function RightToolbar() {
       <motion.div
         animate={{ x: open ? 0 : PANEL_WIDTH + 8 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className="relative h-full shadow-lg flex"
+        className={`relative h-full shadow-lg flex ${open ? 'pointer-events-auto' : ''}`}
         style={{
           width: PANEL_WIDTH + 8,
         }}
@@ -201,7 +201,7 @@ export default function RightToolbar() {
             if (!activePanel) setActivePanel('photo')
           }
         }}
-        className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-l-md shadow-sm z-30 transition-colors cursor-pointer"
+        className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-l-md shadow-sm z-30 transition-colors cursor-pointer pointer-events-auto"
         style={{
           right: open ? PANEL_WIDTH + 8 : 0,
           transition: 'right 0.25s ease-in-out',
