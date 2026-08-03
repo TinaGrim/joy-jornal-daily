@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { cn } from '@/lib/utils'
+import { useTheme } from '../../contexts/ThemeContext'
 import { Compass, Leaf, UtensilsCrossed, Heart, Sparkles } from 'lucide-react'
 
 type CategoryId = 'travel' | 'nature' | 'food' | 'love'
@@ -67,7 +68,7 @@ const categories: Category[] = [
   },
 ]
 
-function DraggableSticker({ emoji, label }: { emoji: string; label: string }) {
+function DraggableSticker({ emoji, label, isDark }: { emoji: string; label: string; isDark: boolean }) {
   const { isDragging, drag } = useToolDrag({
     elementType: 'sticker',
     data: { src: emoji, label, category: '' },
@@ -79,26 +80,29 @@ function DraggableSticker({ emoji, label }: { emoji: string; label: string }) {
     <button
       ref={drag}
       className={cn(
-        'flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 border-border-light bg-white cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-md hover:-translate-y-0.5',
+        'flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-md hover:-translate-y-0.5',
+        isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white',
         isDragging && 'opacity-50',
       )}
     >
       <span className="text-3xl">{emoji}</span>
-      <span className="text-[10px] text-text-muted font-handwriting">{label}</span>
+      <span className={`text-[12px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>{label}</span>
     </button>
   )
 }
 
 export default function StickersPanel() {
   const [activeCategory, setActiveCategory] = useState<CategoryId>('travel')
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const active = categories.find(c => c.id === activeCategory)!
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Sparkles className="w-4 h-4 text-warm-brown" />
-        <p className="text-sm text-warm-brown font-handwriting">Decorative stickers</p>
+        <Sparkles className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+        <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Decorative stickers</p>
       </div>
 
       <div className="grid grid-cols-4 gap-1.5">
@@ -112,21 +116,23 @@ export default function StickersPanel() {
                 'py-2.5 px-1 rounded-xl border-2 flex flex-col items-center gap-1 transition-all cursor-pointer',
                 activeCategory === cat.id
                   ? 'border-terracotta bg-terracotta text-white shadow-sm'
-                  : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
+                  : isDark
+                    ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta/50 hover:bg-terracotta/10'
+                    : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
               )}
             >
               <Icon className={cn('w-4 h-4', activeCategory === cat.id && 'scale-110')} />
-              <span className="text-[10px] font-handwriting leading-tight">{cat.label}</span>
+              <span className="text-[12px] font-handwriting leading-tight">{cat.label}</span>
             </button>
           )
         })}
       </div>
 
-      <div className="p-3 rounded-xl bg-cream border-2 border-border-light">
-        <p className="text-xs text-warm-brown font-handwriting mb-2">{active.label} stickers</p>
+      <div className={`p-3 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
+        <p className={`text-xs font-handwriting mb-2 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>{active.label} stickers</p>
         <div className="grid grid-cols-3 gap-2">
           {active.stickers.map(s => (
-            <DraggableSticker key={s.label} emoji={s.emoji} label={s.label} />
+            <DraggableSticker key={s.label} emoji={s.emoji} label={s.label} isDark={isDark} />
           ))}
         </div>
       </div>

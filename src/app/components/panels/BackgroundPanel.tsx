@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useJournal } from '@/app/contexts/JournalContext'
+import { useTheme } from '../../contexts/ThemeContext'
 import { Check, Grid3x3, CircleDashed, Square, Pipette, LayoutGrid, Palette } from 'lucide-react'
 import type { PagePattern } from '@/types/journal'
 
@@ -45,6 +46,8 @@ export default function BackgroundPanel() {
   const [activeTab, setActiveTab] = useState<Tab>('solid')
   const [customColor, setCustomColor] = useState(currentBg)
   const [applyToAll, setApplyToAll] = useState(false)
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const handleColorSelect = (color: string) => {
     setCustomColor(color)
@@ -91,13 +94,15 @@ export default function BackgroundPanel() {
   return (
     <div className="space-y-5">
       {/* Apply scope toggle */}
-      <div className="flex items-center gap-2 p-2 rounded-xl bg-cream border-2 border-border-light">
-        <LayoutGrid className="w-4 h-4 text-warm-brown" />
+      <div className={`flex items-center gap-2 p-2 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
+        <LayoutGrid className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
         <button
           onClick={() => setApplyToAll(false)}
           className={cn(
             'flex-1 py-1.5 rounded-lg text-xs font-handwriting transition-all cursor-pointer',
-            !applyToAll ? 'bg-white text-ink-navy shadow-sm border border-border-light' : 'text-warm-brown hover:text-ink-navy',
+            !applyToAll
+              ? isDark ? 'bg-[#313244] text-[#cdd6f4] shadow-sm border border-[#45475a]' : 'bg-white text-ink-navy shadow-sm border border-border-light'
+              : isDark ? 'text-[#a6adc8] hover:text-[#cdd6f4]' : 'text-warm-brown hover:text-ink-navy',
           )}
         >
           This page
@@ -106,7 +111,9 @@ export default function BackgroundPanel() {
           onClick={() => setApplyToAll(true)}
           className={cn(
             'flex-1 py-1.5 rounded-lg text-xs font-handwriting transition-all cursor-pointer',
-            applyToAll ? 'bg-white text-ink-navy shadow-sm border border-border-light' : 'text-warm-brown hover:text-ink-navy',
+            applyToAll
+              ? isDark ? 'bg-[#313244] text-[#cdd6f4] shadow-sm border border-[#45475a]' : 'bg-white text-ink-navy shadow-sm border border-border-light'
+              : isDark ? 'text-[#a6adc8] hover:text-[#cdd6f4]' : 'text-warm-brown hover:text-ink-navy',
           )}
         >
           All pages
@@ -114,7 +121,7 @@ export default function BackgroundPanel() {
       </div>
 
       {/* Solid / Pattern tabs */}
-      <div className="flex gap-2 bg-cream rounded-xl p-1 border-2 border-border-light">
+      <div className={`flex gap-2 rounded-xl p-1 border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
         {(['solid', 'pattern'] as const).map(tab => (
           <button
             key={tab}
@@ -122,8 +129,8 @@ export default function BackgroundPanel() {
             className={cn(
               'flex-1 py-2 rounded-lg text-sm font-handwriting transition-all capitalize cursor-pointer',
               activeTab === tab
-                ? 'bg-white text-ink-navy shadow-sm border border-border-light'
-                : 'text-warm-brown hover:text-ink-navy',
+                ? isDark ? 'bg-[#313244] text-[#cdd6f4] shadow-sm border border-[#45475a]' : 'bg-white text-ink-navy shadow-sm border border-border-light'
+                : isDark ? 'text-[#a6adc8] hover:text-[#cdd6f4]' : 'text-warm-brown hover:text-ink-navy',
             )}
           >
             {tab}
@@ -134,12 +141,12 @@ export default function BackgroundPanel() {
       {activeTab === 'solid' ? (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Palette className="w-4 h-4 text-warm-brown" />
-            <p className="text-sm text-warm-brown font-handwriting">Solid Colors</p>
+            <Palette className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+            <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Solid Colors</p>
           </div>
 
           {/* Custom color picker */}
-          <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-border-light bg-white hover:shadow-sm transition-shadow">
+          <div className={`flex items-center gap-3 p-3 rounded-xl border-2 hover:shadow-sm transition-shadow ${isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white'}`}>
             <div className="relative">
               <input
                 type="color"
@@ -152,9 +159,9 @@ export default function BackgroundPanel() {
                 style={{ background: customColor }}
               />
             </div>
-            <Pipette className="w-4 h-4 text-warm-brown" />
-            <span className="text-xs font-handwriting text-warm-brown flex-1">Pick custom color</span>
-            <span className="text-[10px] font-mono text-text-muted bg-cream px-2 py-0.5 rounded">{customColor}</span>
+            <Pipette className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+            <span className={`text-xs font-handwriting flex-1 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Pick custom color</span>
+            <span className={`text-[12px] font-mono px-2 py-0.5 rounded ${isDark ? 'text-[#6c7086] bg-[#181825]' : 'text-text-muted bg-cream'}`}>{customColor}</span>
           </div>
 
           {/* Preset swatches */}
@@ -167,7 +174,7 @@ export default function BackgroundPanel() {
                   'aspect-square rounded-xl border-2 transition-all cursor-pointer relative group',
                   currentBg === c.value && currentPattern === 'blank'
                     ? 'border-ink-navy scale-105 shadow-md'
-                    : 'border-border-light hover:scale-105 hover:shadow-sm',
+                    : isDark ? 'border-[#45475a] hover:scale-105 hover:shadow-sm' : 'border-border-light hover:scale-105 hover:shadow-sm',
                 )}
                 style={{ backgroundColor: c.value }}
                 title={c.label}
@@ -182,7 +189,7 @@ export default function BackgroundPanel() {
           </div>
           <div className="flex gap-2">
             {solidColors.map(c => (
-              <span key={c.value} className="text-[9px] text-text-muted font-handwriting flex-1 text-center truncate">
+              <span key={c.value} className={`text-[11px] font-handwriting flex-1 text-center truncate ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>
                 {c.label}
               </span>
             ))}
@@ -191,8 +198,8 @@ export default function BackgroundPanel() {
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Grid3x3 className="w-4 h-4 text-warm-brown" />
-            <p className="text-sm text-warm-brown font-handwriting">Pattern Overlay</p>
+            <Grid3x3 className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+            <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Pattern Overlay</p>
           </div>
           <div className="grid grid-cols-3 gap-3">
             {patterns.map(p => {
@@ -205,14 +212,14 @@ export default function BackgroundPanel() {
                     'aspect-square rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all cursor-pointer',
                     currentPattern === p.id
                       ? 'border-terracotta bg-terracotta/10 shadow-sm shadow-terracotta/10'
-                      : 'border-border-light bg-white hover:border-terracotta/40 hover:shadow-sm',
+                      : isDark ? 'border-[#45475a] bg-[#313244] hover:border-terracotta/40 hover:shadow-sm' : 'border-border-light bg-white hover:border-terracotta/40 hover:shadow-sm',
                   )}
                 >
                   <Icon className={cn('w-8 h-8', currentPattern === p.id ? 'text-terracotta' : 'text-warm-brown')} />
                   <span className={cn('text-xs font-handwriting', currentPattern === p.id ? 'text-terracotta' : 'text-text-muted')}>
                     {p.label}
                   </span>
-                  <span className={cn('text-[9px] font-handwriting', currentPattern === p.id ? 'text-terracotta/60' : 'text-text-muted/60')}>
+                  <span className={cn('text-[11px] font-handwriting', currentPattern === p.id ? 'text-terracotta/60' : 'text-text-muted/60')}>
                     {p.desc}
                   </span>
                 </button>
@@ -222,8 +229,8 @@ export default function BackgroundPanel() {
 
           {/* Grid size selector — only when grid or dots is active */}
           {currentPattern !== 'blank' && (
-            <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
-              <p className="text-sm text-warm-brown mb-3 font-handwriting">Grid Size</p>
+            <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
+              <p className={`text-sm mb-3 font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Grid Size</p>
               <div className="grid grid-cols-4 gap-2">
                 {GRID_SIZES.map(s => (
                   <button
@@ -233,14 +240,14 @@ export default function BackgroundPanel() {
                       'py-2 rounded-lg border-2 text-xs font-handwriting transition-all cursor-pointer',
                       currentGridSize === s.value
                         ? 'border-terracotta bg-terracotta/10 text-terracotta shadow-sm'
-                        : 'border-border-light bg-white text-warm-brown hover:border-terracotta/40',
+                        : isDark ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta/40' : 'border-border-light bg-white text-warm-brown hover:border-terracotta/40',
                     )}
                   >
                     {s.label}
                   </button>
                 ))}
               </div>
-              <div className="flex justify-between text-[9px] text-text-muted font-handwriting mt-1.5">
+              <div className="flex justify-between text-[11px] text-text-muted font-handwriting mt-1.5">
                 <span>Tight</span>
                 <span>Loose</span>
               </div>
@@ -248,18 +255,18 @@ export default function BackgroundPanel() {
           )}
 
           {/* Current color preview */}
-          <div className="p-3 rounded-xl border-2 border-border-light bg-white">
-            <p className="text-[11px] text-warm-brown font-handwriting mb-2">Current page</p>
+          <div className={`p-3 rounded-xl border-2 ${isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white'}`}>
+            <p className={`text-[11px] font-handwriting mb-2 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Current page</p>
             <div className="flex items-center gap-3">
               <div
                 className="w-8 h-8 rounded-lg border border-border-light shrink-0"
                 style={{ background: currentBg }}
               />
               <div className="flex-1 min-w-0">
-                <span className="text-xs font-handwriting text-ink-navy block truncate">
+                <span className={`text-xs font-handwriting block truncate ${isDark ? 'text-[#cdd6f4]' : 'text-ink-navy'}`}>
                   {currentPattern === 'blank' ? 'No pattern' : `${currentPattern} overlay`}
                 </span>
-                <span className="text-[10px] font-handwriting text-text-muted block">
+                <span className={`text-[12px] font-handwriting block ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>
                   Grid: {currentGridSize}px
                 </span>
               </div>

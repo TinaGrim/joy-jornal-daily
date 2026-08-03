@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
+import { useTheme } from '../../contexts/ThemeContext'
 import { Mail, PenLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +14,8 @@ const colorOptions = [
 export default function EnvelopePanel() {
   const [envelopeColor, setEnvelopeColor] = useState('#d97757')
   const [includeNote, setIncludeNote] = useState(false)
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const { isDragging, drag } = useToolDrag({
     elementType: 'envelope',
@@ -31,9 +34,9 @@ export default function EnvelopePanel() {
 
   return (
     <div className="space-y-5">
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
-        <p className="text-sm text-warm-brown mb-3 font-handwriting">Preview</p>
-        <div className="h-36 rounded-xl border-2 border-border-light overflow-hidden flex items-center justify-center bg-gradient-to-br from-cream to-white">
+      <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
+        <p className={`text-sm mb-3 font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Preview</p>
+        <div className={`h-36 rounded-xl border-2 overflow-hidden flex items-center justify-center ${isDark ? 'border-[#45475a] bg-gradient-to-br from-[#181825] to-[#1e1e2e]' : 'border-border-light bg-gradient-to-br from-cream to-white'}`}>
           <div
             className="w-32 h-22 rounded-lg flex flex-col items-center justify-center transition-colors relative"
             style={{
@@ -43,7 +46,7 @@ export default function EnvelopePanel() {
             }}
           >
             <Mail className="w-7 h-7 drop-shadow-sm" style={{ color: textColor }} />
-            <span className="text-[9px] font-handwriting mt-0.5" style={{ color: textColor, opacity: 0.7 }}>sealed with love</span>
+            <span className="text-[11px] font-handwriting mt-0.5" style={{ color: textColor, opacity: 0.7 }}>sealed with love</span>
           </div>
         </div>
       </div>
@@ -51,17 +54,17 @@ export default function EnvelopePanel() {
       <div>
         <div className="flex items-center gap-2 mb-3">
           <div className="w-4 h-4 rounded-full border-2 border-warm-brown" style={{ backgroundColor: envelopeColor }} />
-          <p className="text-sm text-warm-brown font-handwriting">Envelope Color</p>
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Envelope Color</p>
         </div>
         <div className="flex gap-3">
           {colorOptions.map(c => (
             <button
               key={c.value}
               onClick={() => setEnvelopeColor(c.value)}
-              className={cn(
-                'w-10 h-10 rounded-full border-2 transition-all cursor-pointer relative',
-                envelopeColor === c.value ? 'border-ink-navy scale-110 shadow-md' : 'border-border-light hover:scale-105',
-              )}
+                className={cn(
+                  'w-10 h-10 rounded-full border-2 transition-all cursor-pointer relative',
+                  envelopeColor === c.value ? 'border-ink-navy scale-110 shadow-md' : isDark ? 'border-[#45475a] hover:scale-105' : 'border-border-light hover:scale-105',
+                )}
               style={{ backgroundColor: c.value }}
               title={c.label}
             >
@@ -73,12 +76,12 @@ export default function EnvelopePanel() {
             </button>
           ))}
           <div className="flex-1 flex items-center pl-2">
-            <span className="text-[10px] text-text-muted font-handwriting">{colorOptions.find(c => c.value === envelopeColor)?.label}</span>
+            <span className={`text-[12px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>{colorOptions.find(c => c.value === envelopeColor)?.label}</span>
           </div>
         </div>
       </div>
 
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light space-y-3">
+      <div className={`p-4 rounded-xl border-2 space-y-3 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
         <label className="flex items-center gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -86,20 +89,23 @@ export default function EnvelopePanel() {
             onChange={e => setIncludeNote(e.target.checked)}
             className="w-4 h-4 rounded border-border-light text-terracotta accent-terracotta"
           />
-          <PenLine className="w-4 h-4 text-warm-brown" />
-          <span className="text-sm text-warm-brown font-handwriting">Include editable note</span>
+          <PenLine className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+          <span className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Include editable note</span>
         </label>
 
         <div
           ref={drag}
           className={cn(
-            'py-4 px-4 rounded-xl border-2 border-dashed border-border-dark bg-white text-center cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:bg-cream group',
+            'py-4 px-4 rounded-xl border-2 border-dashed text-center cursor-grab active:cursor-grabbing transition-all group',
+            isDark
+              ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta hover:text-terracotta'
+              : 'border-border-dark bg-white text-warm-brown hover:border-terracotta hover:bg-cream hover:text-terracotta',
             isDragging && 'opacity-50',
           )}
         >
           <Mail className="w-6 h-6 mx-auto mb-1.5 text-warm-brown group-hover:text-terracotta transition-colors" />
           <p className="font-handwriting text-warm-brown group-hover:text-terracotta transition-colors">Drag to page</p>
-          <p className="text-[10px] text-text-muted font-handwriting mt-0.5">Click envelope to open</p>
+          <p className={`text-[12px] font-handwriting mt-0.5 ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>Click envelope to open</p>
         </div>
       </div>
     </div>

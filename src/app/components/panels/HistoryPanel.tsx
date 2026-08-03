@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useJournal } from '@/app/contexts/JournalContext'
+import { useTheme } from '../../contexts/ThemeContext'
 import { cn } from '@/lib/utils'
 import { Clock, RotateCcw, Save, Trash2, Check, Sparkles } from 'lucide-react'
 
@@ -7,6 +8,8 @@ export default function HistoryPanel() {
   const { saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints } = useJournal()
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -57,14 +60,14 @@ export default function HistoryPanel() {
 
       <div className="flex-1 overflow-y-auto mt-4 space-y-2 min-h-0">
         {checkpoints.length === 0 && (
-          <p className="text-xs text-text-muted font-handwriting text-center pt-4">
+          <p className={`text-xs font-handwriting text-center pt-4 ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>
             No checkpoints yet. Click above to save one.
           </p>
         )}
         {checkpoints.map((cp) => (
           <div
             key={cp.id}
-            className="bg-white rounded-xl border border-border-light p-3 space-y-2"
+            className={`rounded-xl border p-3 space-y-2 ${isDark ? 'bg-[#313244] border-[#45475a]' : 'bg-white border-border-light'}`}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
@@ -73,7 +76,7 @@ export default function HistoryPanel() {
                 ) : (
                   <Clock className="w-3.5 h-3.5 text-warm-brown shrink-0" />
                 )}
-                <span className="text-xs text-ink-navy font-handwriting truncate">
+                <span className={`text-xs font-handwriting truncate ${isDark ? 'text-[#cdd6f4]' : 'text-ink-navy'}`}>
                   {formatDate(cp.savedAt)}
                 </span>
               </div>
@@ -101,7 +104,7 @@ export default function HistoryPanel() {
             </div>
             {cp.label && (
               <span className={cn(
-                'inline-block px-2 py-0.5 rounded text-[10px] font-handwriting',
+                'inline-block px-2 py-0.5 rounded text-[12px] font-handwriting',
                 cp.label === 'Auto'
                   ? 'bg-sage/10 text-sage'
                   : 'bg-warm-brown/10 text-warm-brown',

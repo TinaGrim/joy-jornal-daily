@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { motion } from 'motion/react'
 import { useJournal } from '../contexts/JournalContext'
+import { useTheme } from '../contexts/ThemeContext'
 import Canvas from './Canvas'
 import { VintageVignette, VintageCorners, CoverOrnament, ForeEdgePage, BottomPageEdge, RibbonBookmark } from './VintageEffects'
 import { ChevronLeft, ChevronRight, Plus, Check, Maximize2, Minimize2 } from 'lucide-react'
@@ -10,18 +11,19 @@ const PAGE_W = 640
 const PAGE_H = 860
 const SPREAD_W = PAGE_W * 2 + 6
 
-function useScaleToFit(singlePage: boolean) {
+function useScaleToFit(singlePage: boolean, sidebarOpen: boolean, rightPanelOpen: boolean) {
   const [scale, setScale] = useState(1)
 
   useEffect(() => {
     const check = () => {
-      const pad = 32
+      const pad = 16
       const navSpace = 80
-      const sidebarW = 20
-      const rightW = 72
+      const isMobile = window.innerWidth < 768
+      const sidebarW = isMobile ? (sidebarOpen ? 288 : 0) : (sidebarOpen ? 288 : 20)
+      const rightW = isMobile ? (rightPanelOpen ? 368 : 8) : (rightPanelOpen ? 368 : 8)
       const bookW = singlePage ? PAGE_W : SPREAD_W
       const availableW = window.innerWidth - sidebarW - rightW - pad * 2
-      const availableH = window.innerHeight - pad - (singlePage ? pad : navSpace)
+      const availableH = window.innerHeight - pad - (singlePage ? pad : navSpace) - (isMobile ? 64 : 0)
 
       const wScale = availableW / bookW
       const hScale = availableH / PAGE_H
@@ -31,21 +33,23 @@ function useScaleToFit(singlePage: boolean) {
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
-  }, [singlePage])
+  }, [singlePage, sidebarOpen, rightPanelOpen])
 
   return scale
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export default function BookInterface(_props: Record<string, unknown>) {
-  const { pages, bookClosed, setBookClosed, currentPageIndex, setCurrentPageIndex, setFocusPageIndex, addPage } = useJournal()
+export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: boolean }) {
+  const { pages, bookClosed, setBookClosed, currentPageIndex, setCurrentPageIndex, setFocusPageIndex, addPage, rightPanelWidth } = useJournal()
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
   const { status } = useAutoSave(pages)
   const containerRef = useRef<HTMLDivElement>(null)
 
   const [focusMode, setFocusMode] = useState(false)
   const [focusIndex, setFocusIndex] = useState(0)
 
-  const scale = useScaleToFit(focusMode)
+  const scale = useScaleToFit(focusMode, sidebarOpen, rightPanelWidth > 0)
 
   const visibleW = bookClosed ? PAGE_W : focusMode ? PAGE_W : SPREAD_W
   const scaledW = visibleW * scale
@@ -217,15 +221,13 @@ export default function BookInterface(_props: Record<string, unknown>) {
                   <VintageVignette side="right" />
                 </div>
               </div>
-
             </div>
           ) : bookClosed ? (
             <div
               data-book
-              className="flex shadow-2xl rounded-2xl overflow-visible book-shadow"
+              className="flex justify-end shadow-2xl rounded-2xl overflow-visible book-shadow"
               style={{ transform: 'rotateY(-1.5deg)', transformStyle: 'preserve-3d' }}
             >
-              <div className="w-[646px]" />
               <div
                 className="relative overflow-clip rounded-2xl"
                 style={{

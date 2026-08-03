@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-cream: #ece0c8;
   --color-cream-dark: #e5d5b8;
@@ -54,6 +56,11 @@ html, body {
   }
 }
 
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
@@ -62,8 +69,30 @@ html, body {
   animation: fade-in-up 0.3s ease-out;
 }
 
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
 [contenteditable][data-placeholder]:empty:before {
   content: attr(data-placeholder);
   color: #9ca3af;
   pointer-events: none;
+}
+
+.dark [contenteditable][data-placeholder]:empty:before {
+  color: #6c7086;
+}
+
+.dark {
+  --sidebar-bg: #1e1e2e;
+  --sidebar-border: #313244;
+  --panel-bg: #1e1e2e;
+  --panel-border: #313244;
+  --panel-text: #cdd6f4;
+  --panel-text-dim: #a6adc8;
+  --panel-hover: #313244;
+  --tooltip-bg: #1e1e2e;
+  --tooltip-border: #45475a;
 }

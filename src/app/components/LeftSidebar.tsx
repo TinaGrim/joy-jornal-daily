@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'motion/react'
 import { useJournal } from '../contexts/JournalContext'
+import { useTheme } from '../contexts/ThemeContext'
 import { Heart, Trophy, Calendar, Plus, X, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import ExportButton from './ExportButton'
 
@@ -33,7 +34,10 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
     milestones, addMilestone, toggleMilestone, deleteMilestone,
     occasions, addOccasion, deleteOccasion,
     anniversaryDate, setAnniversaryDate,
+    syncLoading,
   } = useJournal()
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const [newMsLabel, setNewMsLabel] = useState('')
   const [newMsEmoji, setNewMsEmoji] = useState('🎯')
@@ -69,15 +73,22 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
   }
 
   return (
-    <div className="fixed left-0 top-0 h-full z-30 flex">
+    <div className="fixed left-0 top-0 h-full z-30">
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-20 md:hidden"
+          onClick={onToggle}
+        />
+      )}
       <motion.div
-        animate={{ width: open ? 288 : 0 }}
+        animate={{ x: open ? 0 : -288 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className="relative overflow-x-hidden h-full shadow-lg flex flex-col"
+        className="relative h-full shadow-lg flex flex-col"
         style={{
-          background: '#f0e6d3',
-          borderRight: '2px solid #e8dcc8',
-          backgroundImage: `
+          width: 288,
+          background: isDark ? '#1e1e2e' : '#f0e6d3',
+          borderRight: isDark ? '2px solid #313244' : '2px solid #e8dcc8',
+          backgroundImage: isDark ? 'none' : `
             repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(139,115,85,0.02) 2px, rgba(139,115,85,0.02) 3px),
             repeating-linear-gradient(90deg, transparent, transparent 30px, rgba(139,115,85,0.012) 30px, rgba(139,115,85,0.012) 31px)
           `,
@@ -85,13 +96,13 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
       >
         <div className="min-w-72 flex-1 flex flex-col relative">
           <div className="sticky top-0 z-10 p-3 flex items-center justify-between" style={{
-            background: 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
-            borderBottom: '2px solid #e8dcc8',
+            background: isDark ? '#1e1e2e' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
+            borderBottom: isDark ? '2px solid #313244' : '2px solid #e8dcc8',
           }}>
             <div className="flex items-center gap-2">
-              <span className="text-[#a89a8a] text-sm">{ORNAMENT}</span>
-              <span className="text-lg font-handwriting text-[#8b7355] tracking-wide">Our Journey</span>
-              <span className="text-[#a89a8a] text-sm">{ORNAMENT}</span>
+              <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
+              <span className={`text-lg font-handwriting tracking-wide ${isDark ? 'text-[#cdd6f4]' : 'text-[#8b7355]'}`}>Our Journey</span>
+              <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
             </div>
             <ExportButton />
           </div>
@@ -113,7 +124,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
               }} />
               <div className="flex items-center justify-center gap-1.5 mb-3">
                 <Heart className="w-3.5 h-3.5 fill-white/80" style={{ color: '#fff' }} />
-                <span className="text-[10px] font-handwriting uppercase tracking-[0.15em] text-white/75">Anniversary Countdown</span>
+                <span className="text-[12px] font-handwriting uppercase tracking-[0.15em] text-white/75">Anniversary Countdown</span>
                 <Heart className="w-3.5 h-3.5 fill-white/80" style={{ color: '#fff' }} />
               </div>
               <div className="text-5xl font-display font-bold text-white mb-1" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
@@ -139,24 +150,36 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Trophy className="w-4 h-4 text-[#c97050]" />
-                  <h2 className="text-lg font-display text-[#5a4a3a] tracking-wide">Milestones</h2>
+                  <h2 className={`text-lg font-display tracking-wide ${isDark ? 'text-[#cdd6f4]' : 'text-[#5a4a3a]'}`}>Milestones</h2>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowMsForm(prev => !prev)}
-                  className="p-1 rounded hover:bg-[#e5d5b8] text-[#8b7355] hover:text-[#c97050] transition-colors cursor-pointer"
+                  className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-[#45475a] text-[#a6adc8] hover:text-[#f38ba8]' : 'hover:bg-[#e5d5b8] text-[#8b7355] hover:text-[#c97050]'}`}
                 >
                   {showMsForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </button>
               </div>
               <div className="space-y-1.5">
+                {syncLoading && sortedMilestones.length === 0 && (
+                  <div className="space-y-1.5">
+                    <div className="h-11 rounded-lg animate-pulse" style={{ background: isDark ? '#45475a' : '#e5d5b8', opacity: 0.5 }} />
+                    <div className="h-11 rounded-lg animate-pulse" style={{ background: isDark ? '#45475a' : '#e5d5b8', opacity: 0.35 }} />
+                    <div className="h-11 rounded-lg animate-pulse" style={{ background: isDark ? '#45475a' : '#e5d5b8', opacity: 0.2 }} />
+                  </div>
+                )}
+                {!syncLoading && sortedMilestones.length === 0 && !showMsForm && (
+                  <p className={`text-xs font-handwriting text-center py-3 ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>
+                    No milestones yet &mdash; click <Plus className="inline w-3 h-3 -mt-0.5" /> to add one
+                  </p>
+                )}
                 {sortedMilestones.map(ms => (
                   <div
                     key={ms.id}
                     className="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all cursor-pointer"
                     style={{
-                      background: ms.done ? 'rgba(123,160,131,0.08)' : '#faf6ef',
-                      border: `1.5px solid ${ms.done ? '#7ba083' : '#e8dcc8'}`,
+                      background: ms.done ? 'rgba(123,160,131,0.08)' : isDark ? '#313244' : '#faf6ef',
+                      border: isDark ? `1.5px solid ${ms.done ? '#7ba083' : '#45475a'}` : `1.5px solid ${ms.done ? '#7ba083' : '#e8dcc8'}`,
                       opacity: ms.done ? 0.75 : 1,
                     }}
                     onClick={() => toggleMilestone(ms.id)}
@@ -174,7 +197,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
                     <span
                       className="text-sm font-handwriting flex-1 transition-all"
                       style={{
-                        color: ms.done ? '#7ba083' : '#5a4a3a',
+                        color: ms.done ? '#7ba083' : isDark ? '#cdd6f4' : '#5a4a3a',
                         textDecoration: ms.done ? 'line-through' : 'none',
                       }}
                     >
@@ -192,19 +215,19 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
                 {showMsForm && (
                   <div className="flex items-center gap-2 p-2 rounded-lg" style={{
                     border: '1.5px dashed #dccfc0',
-                    background: '#faf6ef',
+                    background: isDark ? '#313244' : '#faf6ef',
                   }}>
                     <input
                       value={newMsEmoji}
                       onChange={e => setNewMsEmoji(e.target.value)}
-                      className="w-8 text-center text-lg bg-transparent outline-none"
+                      className={`w-8 text-center text-lg bg-transparent outline-none ${isDark ? 'text-[#cdd6f4]' : ''}`}
                       maxLength={2}
                     />
                     <input
                       value={newMsLabel}
                       onChange={e => setNewMsLabel(e.target.value)}
                       placeholder="What's next?"
-                      className="flex-1 bg-transparent outline-none text-sm font-handwriting text-[#5a4a3a] placeholder:text-[#a89a8a]"
+                      className={`flex-1 bg-transparent outline-none text-sm font-handwriting placeholder:text-[#a89a8a] ${isDark ? 'text-[#cdd6f4]' : 'text-[#5a4a3a]'}`}
                       onKeyDown={e => e.key === 'Enter' && handleAddMilestone()}
                       autoFocus
                     />
@@ -226,19 +249,25 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-[#c97050]" />
-                  <h2 className="text-lg font-display text-[#5a4a3a] tracking-wide">Occasions</h2>
+                  <h2 className={`text-lg font-display tracking-wide ${isDark ? 'text-[#cdd6f4]' : 'text-[#5a4a3a]'}`}>Occasions</h2>
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowOcForm(prev => !prev)}
-                  className="p-1 rounded hover:bg-[#e5d5b8] text-[#8b7355] hover:text-[#c97050] transition-colors cursor-pointer"
+                  className={`p-1 rounded transition-colors cursor-pointer ${isDark ? 'hover:bg-[#45475a] text-[#a6adc8] hover:text-[#f38ba8]' : 'hover:bg-[#e5d5b8] text-[#8b7355] hover:text-[#c97050]'}`}
                 >
                   {showOcForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </button>
               </div>
               <div className="space-y-1.5">
-                {occasions.length === 0 && !showOcForm && (
-                  <p className="text-xs text-[#a89a8a] font-handwriting text-center py-2">
+                {syncLoading && occasions.length === 0 && (
+                  <div className="space-y-1.5">
+                    <div className="h-11 rounded-lg animate-pulse" style={{ background: isDark ? '#45475a' : '#e5d5b8', opacity: 0.5 }} />
+                    <div className="h-11 rounded-lg animate-pulse" style={{ background: isDark ? '#45475a' : '#e5d5b8', opacity: 0.35 }} />
+                  </div>
+                )}
+                {!syncLoading && occasions.length === 0 && !showOcForm && (
+                  <p className={`text-xs font-handwriting text-center py-2 ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>
                     No occasions yet &mdash; add birthdays, trips & more
                   </p>
                 )}
@@ -247,14 +276,14 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
                     key={oc.id}
                     className="group flex items-center gap-2.5 p-2.5 rounded-lg transition-all cursor-default"
                     style={{
-                      background: '#faf6ef',
-                      border: '1.5px solid #e8dcc8',
+                      background: isDark ? '#313244' : '#faf6ef',
+                      border: isDark ? '1.5px solid #45475a' : '1.5px solid #e8dcc8',
                     }}
                   >
                     <span className="text-base">{oc.emoji}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-handwriting text-[#5a4a3a] truncate">{oc.label}</div>
-                      <div className="text-[11px] text-[#a89a8a] font-handwriting">{oc.date}</div>
+                      <div className={`text-sm font-handwriting truncate ${isDark ? 'text-[#cdd6f4]' : 'text-[#5a4a3a]'}`}>{oc.label}</div>
+                      <div className={`text-[11px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{oc.date}</div>
                     </div>
                     <button
                       type="button"
@@ -268,20 +297,20 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
                 {showOcForm && (
                   <div className="space-y-2 p-2.5 rounded-lg" style={{
                     border: '1.5px dashed #dccfc0',
-                    background: '#faf6ef',
+                    background: isDark ? '#313244' : '#faf6ef',
                   }}>
                     <div className="flex items-center gap-2">
                       <input
                         value={newOcEmoji}
                         onChange={e => setNewOcEmoji(e.target.value)}
-                        className="w-8 text-center text-lg bg-transparent outline-none"
+                        className={`w-8 text-center text-lg bg-transparent outline-none ${isDark ? 'text-[#cdd6f4]' : ''}`}
                         maxLength={2}
                       />
                       <input
                         value={newOcLabel}
                         onChange={e => setNewOcLabel(e.target.value)}
                         placeholder="Label"
-                        className="flex-1 bg-transparent outline-none text-sm font-handwriting text-[#5a4a3a] placeholder:text-[#a89a8a]"
+                        className={`flex-1 bg-transparent outline-none text-sm font-handwriting placeholder:text-[#a89a8a] ${isDark ? 'text-[#cdd6f4]' : 'text-[#5a4a3a]'}`}
                         autoFocus
                       />
                     </div>
@@ -290,7 +319,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
                         value={newOcDate}
                         onChange={e => setNewOcDate(e.target.value)}
                         placeholder="Date (e.g. 12 Mar)"
-                        className="flex-1 bg-transparent outline-none text-xs font-handwriting text-[#8b7355] placeholder:text-[#a89a8a]"
+                        className={`flex-1 bg-transparent outline-none text-xs font-handwriting placeholder:text-[#a89a8a] ${isDark ? 'text-[#a6adc8]' : 'text-[#8b7355]'}`}
                         onKeyDown={e => e.key === 'Enter' && handleAddOccasion()}
                       />
                       <button
@@ -317,12 +346,14 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
       <button
         type="button"
         onClick={onToggle}
-        className="h-14 w-5 my-auto flex items-center justify-center rounded-r-md shadow-sm z-30 transition-colors cursor-pointer"
+        className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-r-md shadow-sm z-30 transition-colors cursor-pointer"
         style={{
-          background: 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
-          border: '2px solid #e8dcc8',
+          left: open ? 288 : 0,
+          transition: 'left 0.25s ease-in-out',
+          background: isDark ? '#313244' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
+          border: isDark ? '2px solid #45475a' : '2px solid #e8dcc8',
           borderLeft: 'none',
-          color: '#8b7355',
+          color: isDark ? '#cdd6f4' : '#8b7355',
         }}
         title={open ? 'Close sidebar' : 'Open sidebar'}
       >

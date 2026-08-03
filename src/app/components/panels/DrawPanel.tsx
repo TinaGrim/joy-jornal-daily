@@ -1,4 +1,5 @@
 import { useJournal } from '../../contexts/JournalContext'
+import { useTheme } from '../../contexts/ThemeContext'
 import type { BrushType } from '@/types/journal'
 import { cn } from '@/lib/utils'
 import { Pen, Highlighter, Eraser, Pipette, Paintbrush, CircleDot } from 'lucide-react'
@@ -15,13 +16,15 @@ const PRESET_COLORS = ['#2c3e50', '#d97757', '#7ba083', '#e8a87c', '#a8c5ab', '#
 
 export default function DrawPanel() {
   const { drawSettings, setDrawSettings } = useJournal()
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   return (
     <div className="space-y-6">
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
+      <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
         <div className="flex items-center gap-2 mb-3">
-          <Paintbrush className="w-4 h-4 text-warm-brown" />
-          <p className="text-sm text-warm-brown font-handwriting">Brush Type</p>
+          <Paintbrush className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Brush Type</p>
         </div>
         <div className="grid grid-cols-5 gap-2">
           {brushes.map(b => {
@@ -34,12 +37,14 @@ export default function DrawPanel() {
                   'py-3 px-1 rounded-xl border-2 flex flex-col items-center gap-1 transition-all cursor-pointer',
                   drawSettings.brush === b.id
                     ? 'border-terracotta bg-terracotta text-white shadow-sm shadow-terracotta/20'
-                    : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
+                    : isDark
+                      ? 'border-[#45475a] bg-[#313244] text-[#cdd6f4] hover:border-terracotta/50 hover:bg-terracotta/10'
+                      : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50 hover:bg-terracotta/5',
                 )}
               >
                 <Icon className={cn('w-5 h-5', drawSettings.brush === b.id && 'scale-110')} />
-                <span className="text-[10px] font-handwriting leading-tight">{b.label}</span>
-                <span className="text-[8px] opacity-60 leading-tight">{b.desc}</span>
+                <span className="text-[12px] font-handwriting leading-tight">{b.label}</span>
+                <span className="text-[11px] opacity-60 leading-tight">{b.desc}</span>
               </button>
             )
           })}
@@ -50,7 +55,7 @@ export default function DrawPanel() {
         <div>
           <div className="flex items-center gap-2 mb-3">
             <div className="w-4 h-4 rounded-full border-2 border-warm-brown" style={{ backgroundColor: drawSettings.color }} />
-            <p className="text-sm text-warm-brown font-handwriting">Ink Color</p>
+            <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Ink Color</p>
           </div>
           <div className="flex gap-3 flex-wrap">
             {PRESET_COLORS.map(color => (
@@ -59,7 +64,7 @@ export default function DrawPanel() {
                 onClick={() => setDrawSettings({ ...drawSettings, color })}
                 className={cn(
                   'w-9 h-9 rounded-full border-2 transition-all cursor-pointer relative',
-                  drawSettings.color === color ? 'border-ink-navy scale-110 shadow-md' : 'border-border-light hover:scale-105',
+                  drawSettings.color === color ? 'border-ink-navy scale-110 shadow-md' : isDark ? 'border-[#45475a] hover:scale-105' : 'border-border-light hover:scale-105',
                 )}
                 style={{ backgroundColor: color }}
               >
@@ -75,10 +80,10 @@ export default function DrawPanel() {
       )}
 
       {drawSettings.brush !== 'lasso' && (
-        <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
+        <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-warm-brown font-handwriting">Stroke Width</p>
-            <span className="text-xs bg-white border border-border-light px-2.5 py-1 rounded-md text-ink-navy font-handwriting shadow-sm">{drawSettings.strokeWidth}px</span>
+            <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Stroke Width</p>
+            <span className={`text-xs border px-2.5 py-1 rounded-md font-handwriting shadow-sm ${isDark ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4]' : 'bg-white border-border-light text-ink-navy'}`}>{drawSettings.strokeWidth}px</span>
           </div>
           <input
             type="range"
@@ -88,7 +93,7 @@ export default function DrawPanel() {
             onChange={e => setDrawSettings({ ...drawSettings, strokeWidth: Number(e.target.value) })}
             className="w-full accent-terracotta"
           />
-          <div className="flex justify-between text-[10px] text-text-muted font-handwriting mt-0.5">
+          <div className="flex justify-between text-[12px] text-text-muted font-handwriting mt-0.5">
             <span>Fine</span>
             <span>Thick</span>
           </div>
@@ -98,7 +103,7 @@ export default function DrawPanel() {
       {drawSettings.active && (
         <div className="p-3 rounded-xl bg-sage/10 border border-sage/20 text-center">
           <p className="text-sm text-sage font-handwriting">
-            {drawSettings.brush === 'lasso' ? 'Lasso active — draw around elements to select' : 'Drawing active — click and drag on the page'}
+            {drawSettings.brush === 'lasso' ? 'Lasso active \u2014 draw around elements to select' : 'Drawing active \u2014 click and drag on the page'}
           </p>
         </div>
       )}

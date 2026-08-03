@@ -723,7 +723,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                   <div className={`absolute ${menuAbove ? 'top-8' : 'bottom-8'} left-0 bg-white rounded-lg shadow-xl border border-[#e5d5b8] py-1 min-w-[150px] z-20`} onClick={e => e.stopPropagation()}>
                     {element.type === 'text' && (
                       <div className="px-2 py-1.5 border-b border-[#e5d5b8]">
-                        <span className="text-[10px] font-medium text-[#8b7355] uppercase tracking-wider">Font</span>
+                        <span className="text-[12px] font-medium text-[#8b7355] uppercase tracking-wider">Font</span>
                         <div className="mt-1 space-y-0.5">
                           {FONTS.map(font => (
                             <button
@@ -737,7 +737,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                           ))}
                         </div>
                         <div className="mt-2 pt-2 border-t border-[#e5d5b8]">
-                          <span className="text-[10px] font-medium text-[#8b7355] uppercase tracking-wider">Size</span>
+                          <span className="text-[12px] font-medium text-[#8b7355] uppercase tracking-wider">Size</span>
                           <div className="mt-1 flex items-center gap-1">
                             <button
                               onClick={() => { const s = Math.max(8, ((element.data.fontSize as number) || 24) - 2); updateElement(element.id, { data: { ...element.data, fontSize: s } }, undefined, pageIndex); setMenuOpen(false) }}
@@ -754,7 +754,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                               <button
                                 key={s}
                                 onClick={() => { updateElement(element.id, { data: { ...element.data, fontSize: s } }, undefined, pageIndex); setMenuOpen(false) }}
-                                className={`px-1.5 py-0.5 rounded text-[10px] hover:bg-[#f0e6d3] cursor-pointer ${(element.data.fontSize as number) === s ? 'bg-[#d97757] text-white' : 'text-[#8b7355]'}`}
+                                className={`px-1.5 py-0.5 rounded text-[12px] hover:bg-[#f0e6d3] cursor-pointer ${(element.data.fontSize as number) === s ? 'bg-[#d97757] text-white' : 'text-[#8b7355]'}`}
                               >{s}</button>
                             ))}
                           </div>

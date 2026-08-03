@@ -3,6 +3,7 @@ import { useToolDrag } from '@/hooks/useToolDrag'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useJournal } from '@/app/contexts/JournalContext'
+import { useTheme } from '../../contexts/ThemeContext'
 import type { CanvasElement } from '@/types/journal'
 import { Map, LayoutGrid, Quote, ListChecks, Sparkles, Trash2 } from 'lucide-react'
 
@@ -68,7 +69,7 @@ const templateLayouts: Record<string, TemplateElement[]> = {
 
 const templateBackup: Record<string, CanvasElement[]> = {}
 
-function TemplateCard({ template }: { template: Template }) {
+function TemplateCard({ template, isDark }: { template: Template; isDark: boolean }) {
   const Icon = template.icon
   const { replacePageElements, pages, focusPageIndex } = useJournal()
   const key = `${template.id}-${focusPageIndex}`
@@ -116,7 +117,8 @@ function TemplateCard({ template }: { template: Template }) {
     <div
       ref={drag}
       className={cn(
-        'group bg-white rounded-xl border-2 border-border-light overflow-hidden transition-all hover:shadow-lg hover:border-terracotta/40',
+        'group rounded-xl border-2 overflow-hidden transition-all hover:shadow-lg hover:border-terracotta/40',
+        isDark ? 'bg-[#313244] border-[#45475a]' : 'bg-white border-border-light',
         isDragging && 'opacity-50',
       )}
     >
@@ -128,15 +130,15 @@ function TemplateCard({ template }: { template: Template }) {
         <div className="absolute inset-0 bg-gradient-to-t from-white/20 to-transparent" />
       </div>
       <div className="p-4 space-y-2.5">
-        <h3 className="font-display text-sm text-ink-navy">{template.name}</h3>
-        <p className="text-xs text-text-muted font-handwriting leading-relaxed">{template.description}</p>
+        <h3 className={`font-display text-sm ${isDark ? 'text-[#cdd6f4]' : 'text-ink-navy'}`}>{template.name}</h3>
+        <p className={`text-xs font-handwriting leading-relaxed ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>{template.description}</p>
         <button
           onClick={applied ? handleUnapply : handleApply}
           className={cn(
             'w-full py-2.5 rounded-xl text-sm font-handwriting transition-all cursor-pointer',
-            applied
-              ? 'bg-red-400 text-white hover:bg-red-500 shadow-sm'
-              : 'bg-cream text-warm-brown hover:bg-terracotta hover:text-white border-2 border-border-light hover:border-terracotta hover:shadow-sm',
+              applied
+                ? 'bg-red-400 text-white hover:bg-red-500 shadow-sm'
+                : isDark ? 'bg-[#181825] text-[#a6adc8] hover:bg-terracotta hover:text-white border-2 border-[#45475a] hover:border-terracotta hover:shadow-sm' : 'bg-cream text-warm-brown hover:bg-terracotta hover:text-white border-2 border-border-light hover:border-terracotta hover:shadow-sm',
           )}
         >
           {applied ? 'Revert Template' : 'Apply to Page'}
@@ -149,6 +151,8 @@ function TemplateCard({ template }: { template: Template }) {
 export default function TemplatesPanel() {
   const { clearPage } = useJournal()
   const [clearConfirm, setClearConfirm] = useState(false)
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const handleClearPage = () => {
     if (!clearConfirm) {
@@ -169,15 +173,15 @@ export default function TemplatesPanel() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Sparkles className="w-4 h-4 text-warm-brown" />
-        <p className="text-sm text-warm-brown font-handwriting">Choose a layout or drag to canvas</p>
+        <Sparkles className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+        <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Choose a layout or drag to canvas</p>
       </div>
       <div className="grid grid-cols-1 gap-4">
         {templates.map(t => (
-          <TemplateCard key={t.id} template={t} />
+          <TemplateCard key={t.id} template={t} isDark={isDark} />
         ))}
       </div>
-      <div className="pt-4 border-t border-border-light">
+      <div className={`pt-4 border-t ${isDark ? 'border-[#45475a]' : 'border-border-light'}`}>
         <button
           onClick={handleClearPage}
           className={cn(

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
+import { useTheme } from '../../contexts/ThemeContext'
 import { Type, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -17,6 +18,8 @@ export default function TextPanel() {
   const [fontSize, setFontSize] = useState(24)
   const [selectedColor, setSelectedColor] = useState('#2c3e50')
   const [textInput, setTextInput] = useState('')
+  const { theme } = useTheme()
+  const isDark = theme === 'night'
 
   const { isDragging, drag } = useToolDrag({
     elementType: 'text',
@@ -32,10 +35,10 @@ export default function TextPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light">
+      <div className={`p-4 rounded-xl border-2 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
         <div className="flex items-center gap-2 mb-3">
-          <Type className="w-4 h-4 text-warm-brown" />
-          <p className="text-sm text-warm-brown font-handwriting">Font Style</p>
+          <Type className={`w-4 h-4 ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`} />
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Font Style</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {fonts.map(f => (
@@ -46,11 +49,13 @@ export default function TextPanel() {
                 'py-2.5 px-3 rounded-xl border-2 transition-all cursor-pointer text-left',
                 selectedFont === f.id
                   ? 'border-terracotta bg-white shadow-sm shadow-terracotta/10'
-                  : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50',
+                  : isDark
+                    ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta/50'
+                    : 'border-border-light bg-white text-warm-brown hover:border-terracotta/50',
               )}
             >
               <span className={cn('block text-sm leading-tight', f.className, selectedFont === f.id ? 'text-ink-navy' : 'text-warm-brown')}>{f.label}</span>
-              <span className={cn('block text-[10px] font-handwriting leading-tight mt-0.5', selectedFont === f.id ? 'text-terracotta' : 'text-text-muted')}>{f.desc}</span>
+              <span className={cn('block text-[12px] font-handwriting leading-tight mt-0.5', selectedFont === f.id ? 'text-terracotta' : 'text-text-muted')}>{f.desc}</span>
             </button>
           ))}
         </div>
@@ -58,8 +63,8 @@ export default function TextPanel() {
 
       <div>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-sm text-warm-brown font-handwriting">Font Size</p>
-          <span className="text-xs bg-white border border-border-light px-2.5 py-1 rounded-md text-ink-navy font-handwriting shadow-sm">{fontSize}px</span>
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Font Size</p>
+          <span className={`text-xs border px-2.5 py-1 rounded-md font-handwriting shadow-sm ${isDark ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4]' : 'bg-white border-border-light text-ink-navy'}`}>{fontSize}px</span>
         </div>
         <input
           type="range"
@@ -69,7 +74,7 @@ export default function TextPanel() {
           onChange={e => setFontSize(Number(e.target.value))}
           className="w-full accent-terracotta"
         />
-        <div className="flex justify-between text-[10px] text-text-muted font-handwriting mt-0.5">
+        <div className="flex justify-between text-[12px] text-text-muted font-handwriting mt-0.5">
           <span>Small</span>
           <span>Large</span>
         </div>
@@ -78,17 +83,17 @@ export default function TextPanel() {
       <div>
         <div className="flex items-center gap-2 mb-3">
           <div className="w-4 h-4 rounded-full border-2 border-warm-brown" style={{ backgroundColor: selectedColor }} />
-          <p className="text-sm text-warm-brown font-handwriting">Color</p>
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Color</p>
         </div>
         <div className="flex gap-3 flex-wrap">
           {PRESET_COLORS.map(color => (
             <button
               key={color}
               onClick={() => setSelectedColor(color)}
-              className={cn(
-                'w-9 h-9 rounded-full border-2 transition-all cursor-pointer relative',
-                selectedColor === color ? 'border-ink-navy scale-110 shadow-md' : 'border-border-light hover:scale-105',
-              )}
+                className={cn(
+                  'w-9 h-9 rounded-full border-2 transition-all cursor-pointer relative',
+                  selectedColor === color ? 'border-ink-navy scale-110 shadow-md' : isDark ? 'border-[#45475a] hover:scale-105' : 'border-border-light hover:scale-105',
+                )}
               style={{ backgroundColor: color }}
             >
               {selectedColor === color && (
@@ -101,23 +106,26 @@ export default function TextPanel() {
         </div>
       </div>
 
-      <div className="p-4 rounded-xl bg-cream border-2 border-border-light space-y-3">
+      <div className={`p-4 rounded-xl border-2 space-y-3 ${isDark ? 'bg-[#181825] border-[#45475a]' : 'bg-cream border-border-light'}`}>
         <div className="flex items-center gap-2">
-          <p className="text-sm text-warm-brown font-handwriting">Your Text</p>
-          <ArrowRight className="w-3.5 h-3.5 text-warm-brown/40" />
-          <span className="text-[10px] text-text-muted font-handwriting">Drag to page</span>
+          <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Your Text</p>
+          <ArrowRight className={`w-3.5 h-3.5 ${isDark ? 'text-[#6c7086]' : 'text-warm-brown/40'}`} />
+          <span className={`text-[12px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>Drag to page</span>
         </div>
         <textarea
           value={textInput}
           onChange={e => setTextInput(e.target.value)}
           placeholder="Type your text here..."
           rows={3}
-          className="w-full px-4 py-3 rounded-xl border-2 border-border-light bg-white text-ink-navy text-sm resize-none font-handwriting placeholder:text-text-muted/40 focus:outline-none focus:border-terracotta transition-colors"
+          className={`w-full px-4 py-3 rounded-xl border-2 text-sm resize-none font-handwriting placeholder:text-text-muted/40 focus:outline-none focus:border-terracotta transition-colors ${isDark ? 'border-[#45475a] bg-[#313244] text-[#cdd6f4]' : 'border-border-light bg-white text-ink-navy'}`}
         />
         <div
           ref={drag}
           className={cn(
-            'w-full py-3 px-4 rounded-xl border-2 border-dashed border-border-dark bg-white flex items-center justify-center gap-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:bg-cream group',
+            'w-full py-3 px-4 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 cursor-grab active:cursor-grabbing transition-all group',
+            isDark
+              ? 'border-[#45475a] bg-[#313244] text-[#a6adc8] hover:border-terracotta hover:text-terracotta'
+              : 'border-border-dark bg-white text-warm-brown hover:border-terracotta hover:bg-cream hover:text-terracotta',
             isDragging && 'opacity-50',
           )}
         >
@@ -127,7 +135,7 @@ export default function TextPanel() {
       </div>
 
       <div
-        className="p-4 rounded-xl border-2 border-border-light bg-white text-center shadow-sm"
+        className={`p-4 rounded-xl border-2 text-center shadow-sm ${isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white'}`}
         style={{ fontFamily: selectedFont, fontSize, color: selectedColor }}
       >
         {textInput || 'Your text'}
