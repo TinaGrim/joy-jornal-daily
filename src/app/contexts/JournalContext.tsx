@@ -4,6 +4,7 @@ import confetti from 'canvas-confetti'
 import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, JourneyDetails, PagePattern } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
+import { mergePageSnapshots } from '@/lib/mergePages'
 import { useFirebaseAuth } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
 
@@ -143,6 +144,7 @@ interface JournalContextType {
   isAuthenticated: boolean
   authLoading: boolean
   authError: string | null
+  cloudLoading: boolean
   signInWithGoogle: () => void
   signInAnonymously: () => void
   signOut: () => void
@@ -288,46 +290,36 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) {
       return
     }
-
-    if (!sync.loading && sync.pages.length > 0) {
-      console.log('[JournalContext] loading', sync.pages.length, 'pages from BroadcastChannel peer')
-      initializedRef.current = true
-      const cleaned = deduplicatePageElements(sanitizePages(sync.pages))
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync external state into React
-      setPages(cleaned)
-      savePagesToStorage(cleaned)
-    } else if (!sync.loading) {
-      console.log('[JournalContext] No peer data yet, keeping localStorage')
-      initializedRef.current = true
+    if (sync.loading) {
+      return
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to peer data loading once
+
+    initializedRef.current = true
+    if (sync.pages.length === 0) {
+      console.log('[JournalContext] no cloud data yet, publishing local pages')
+      // First device online: publish this origin's data so every origin
+      // converges on one shared book instead of per-origin copies.
+      sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current)))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: publish local data once cloud becomes available
   }, [isAuthenticated, sync.loading])
 
   useEffect(() => {
     if (!initializedRef.current) return
     if (sync.pages.length === 0) return
     const incoming = deduplicatePageElements(sanitizePages(sync.pages))
-    if (pagesRef.current.length !== incoming.length) {
-      setPages(incoming)
-    } else {
-      let changed = false
-      for (let i = 0; i < incoming.length && !changed; i++) {
-        const a = pagesRef.current[i]
-        const b = incoming[i]
-        if (a.background !== b.background || a.pattern !== b.pattern) changed = true
-        if ((a.elements?.length ?? 0) !== (b.elements?.length ?? 0)) changed = true
-        if (!changed) {
-          for (let j = 0; j < (a.elements?.length ?? 0) && !changed; j++) {
-            const ea = a.elements[j]
-            const eb = b.elements[j]
-            if (ea.x !== eb.x || ea.y !== eb.y || ea.width !== eb.width || ea.height !== eb.height) changed = true
-            if (!changed && ea.data?.[ELEMENT_TS_KEY] !== eb.data?.[ELEMENT_TS_KEY]) changed = true
-          }
-        }
-      }
-      if (changed) setPages(incoming)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to sync.pages changes
+    // Merge the cloud book with this origin's local book instead of
+    // replacing it, so edits made while offline (or on the old sync
+    // design) are never lost; per element the newest `_updatedAt` wins.
+    const merged = mergePageSnapshots([
+      { pages: incoming, updatedAt: 0, deviceId: 'cloud' },
+      { pages: deduplicatePageElements(sanitizePages(pagesRef.current)), updatedAt: 0, deviceId: 'local' },
+    ])
+    const canonical = (pages: Page[]) =>
+      pages.map(p => ({ ...p, elements: [...(p.elements ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) }))
+    if (JSON.stringify(canonical(pagesRef.current)) === JSON.stringify(canonical(merged))) return
+    setPages(merged)
+    savePagesToStorage(merged)
   }, [sync.pages])
 
   const hadLocalMetadataRef = useRef(!!loadMetadataFromStorage())
@@ -478,7 +470,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = {
         ...updated[idx],
-        elements: updated[idx].elements.filter(el => el.id !== id),
+        elements: updated[idx].elements.map(el =>
+          el.id === id ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+        ),
       }
       return updated
     })
@@ -492,7 +486,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = {
         ...updated[idx],
-        elements: updated[idx].elements.filter(el => !idSet.has(el.id)),
+        elements: updated[idx].elements.map(el =>
+          idSet.has(el.id) ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+        ),
       }
       return updated
     })
@@ -590,13 +586,16 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       const element = updated[fromPage].elements.find(el => el.id === elementId)
       if (!element) return prev
+      const now = Date.now()
       updated[fromPage] = {
         ...updated[fromPage],
-        elements: updated[fromPage].elements.filter(el => el.id !== elementId),
+        elements: updated[fromPage].elements.map(el =>
+          el.id === elementId ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: now } } : el
+        ),
       }
       updated[toPage] = {
         ...updated[toPage],
-        elements: [...updated[toPage].elements, { ...element, x: newX, y: newY, data: { ...element.data, [ELEMENT_TS_KEY]: Date.now() } }],
+        elements: [...updated[toPage].elements, { ...element, x: newX, y: newY, data: { ...element.data, _deleted: false, _updatedAt: now + 1 } }],
       }
       return updated
     })
@@ -617,7 +616,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const idx = focusPageIndexRef.current
     savePages(prev => {
       const updated = [...prev]
-      updated[idx] = { ...updated[idx], elements: [] }
+      updated[idx] = {
+        ...updated[idx],
+        elements: updated[idx].elements.map(el => ({
+          ...el,
+          data: { ...el.data, _deleted: true, _updatedAt: Date.now() },
+        })),
+      }
       return updated
     })
     sync.broadcastOperation({ type: 'page-clear', pageIndex: idx })
@@ -741,7 +746,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         selectedElementIds, setSelectedElementIds, batchUpdateElements,
         journeyDetails, setJourneyDetails,
         rightPanelWidth, setRightPanelWidth,
-        isAuthenticated, authLoading, authError, signInWithGoogle, signInAnonymously, signOut,
+        isAuthenticated, authLoading, authError, cloudLoading: isAuthenticated && sync.loading, signInWithGoogle, signInAnonymously, signOut,
         syncLoading, isConnected: sync.isConnected,
         syncLatency, syncPeakLatency,
         flushSync: () => { sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current))); sync.flushPages() },

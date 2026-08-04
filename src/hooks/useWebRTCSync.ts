@@ -63,7 +63,9 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
       if (!updated[pageIndex]) return pages
       updated[pageIndex] = {
         ...updated[pageIndex],
-        elements: (updated[pageIndex].elements ?? []).filter(el => el.id !== elementId),
+        elements: (updated[pageIndex].elements ?? []).map(el =>
+          el.id === elementId ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+        ),
       }
       return updated
     }
@@ -95,7 +97,13 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
     case 'page-clear': {
       const { pageIndex } = operation
       if (!updated[pageIndex]) return pages
-      updated[pageIndex] = { ...updated[pageIndex], elements: [] }
+      updated[pageIndex] = {
+        ...updated[pageIndex],
+        elements: (updated[pageIndex].elements ?? []).map(el => ({
+          ...el,
+          data: { ...el.data, _deleted: true, _updatedAt: Date.now() },
+        })),
+      }
       return updated
     }
     default:
@@ -118,6 +126,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
   const pagesRef = useRef<Page[]>([])
   const cursorsRef = useRef<Map<string, RemoteCursor>>(new Map())
   const seenOpUids = useRef<Set<string>>(new Set())
+  const firstCloudDataRef = useRef(false)
   const deviceIdRef = useRef(`device-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
 
   const publishCursors = useCallback(() => {
@@ -172,6 +181,14 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
     applyIncomingPages(incomingPages)
   }, [applyIncomingPages])
 
+  const onIncomingFBPages = useCallback((incomingPages: Page[]) => {
+    if (!firstCloudDataRef.current) {
+      firstCloudDataRef.current = true
+      setLoading(false)
+    }
+    applyIncomingPages(incomingPages)
+  }, [applyIncomingPages])
+
   const onIncomingMetadata = useCallback((incomingMetadata: JournalMetadata | null) => {
     if (incomingMetadata) {
       setMetadata(incomingMetadata)
@@ -185,7 +202,6 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
       onIncomingPages,
       (connected) => {
         setIsConnected(connected)
-        if (connected) setLoading(false)
       },
       (cursor) => {
         cursorsRef.current.set(cursor.userId, {
@@ -205,15 +221,19 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
 
     syncRef.current = bs
     bs.start()
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- init complete
-    setLoading(false)
 
     let fbSync: FirebaseSync | null = null
     if (isFirebaseReady) {
-      fbSync = createFirebaseSync(onIncomingPages, onIncomingMetadata, onIncomingFBOp)
+      fbSync = createFirebaseSync(onIncomingFBPages, onIncomingMetadata, onIncomingFBOp)
       fbSync.start()
       fbSyncRef.current = fbSync
+    } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- no cloud configured, skip waiting
+      setLoading(false)
     }
+
+    // If Firebase never delivers (offline), fall back to local data after a timeout
+    const fallbackTimer = setTimeout(() => setLoading(false), 10000)
 
     const cleanup = setInterval(() => {
       const now = Date.now()
@@ -236,8 +256,9 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
       syncRef.current = null
       fbSyncRef.current = null
       clearInterval(cleanup)
+      clearTimeout(fallbackTimer)
     }
-  }, [enabled, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata])
+  }, [enabled, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata, onIncomingFBPages])
 
   const savePages = useCallback((newPages: Page[]) => {
     setPages(newPages)

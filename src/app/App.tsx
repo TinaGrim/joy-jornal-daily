@@ -39,7 +39,7 @@ function JournalApp() {
   const { theme } = useTheme()
   const isNight = theme === 'night'
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { selectedElementId, setSelectedElementId, deleteElement, updateElement, pages, focusPageIndex } = useJournal()
+  const { selectedElementId, setSelectedElementId, deleteElement, updateElement, pages, focusPageIndex, cloudLoading } = useJournal()
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -158,7 +158,14 @@ function JournalApp() {
           transition={{ duration: 0.7, delay: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
           className="flex items-center justify-center p-4 pb-20 md:pb-4 md:p-8 min-w-0"
         >
-          <BookInterface sidebarOpen={sidebarOpen} />
+          {cloudLoading ? (
+            <div className="flex flex-col items-center gap-3 py-32">
+              <div className="w-9 h-9 border-[3px] border-[#d97757] border-t-transparent rounded-full animate-spin" />
+              <span className="font-handwriting text-xl text-[#8b7355]">Opening the journal...</span>
+            </div>
+          ) : (
+            <BookInterface sidebarOpen={sidebarOpen} />
+          )}
         </motion.div>
 
         <motion.div

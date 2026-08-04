@@ -2,14 +2,24 @@ import { ref, onValue, set, off, get, push, query, limitToLast, onChildAdded, ty
 import { rtdb } from '@/lib/firebase'
 import type { Page } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
+import { mergePageSnapshots } from '@/lib/mergePages'
 
 const BOOK_PATH = 'journal/shared'
+const PAGES_PATH = 'journal/v2/pages'
 const MAX_HISTORY = 50
+const STALE_SLOT_MS = 7 * 24 * 60 * 60 * 1000
+const DEVICE_ID_KEY = 'journal_device_id'
 
 export interface CheckpointInfo {
   id: string
   savedAt: number
   label?: string
+}
+
+interface PageSlot {
+  pages: Page[]
+  updatedAt: number
+  deviceId: string
 }
 
 export class FirebaseSync {
@@ -19,6 +29,9 @@ export class FirebaseSync {
   private unsubPages: Unsubscribe | null = null
   private unsubMetadata: Unsubscribe | null = null
   private unsubOps: Unsubscribe | null = null
+  private unsubLegacy: Unsubscribe | null = null
+  private v2Slots: PageSlot[] = []
+  private legacySlot: PageSlot | null = null
   private deviceId: string
   private writingPages = false
   private writingMetadata = false
@@ -36,20 +49,61 @@ export class FirebaseSync {
     this.onPages = onPages
     this.onMetadata = onMetadata
     this.onOperation = onOperation ?? null
-    this.deviceId = `device-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    this.deviceId = this.getStableDeviceId()
+  }
+
+  private getStableDeviceId(): string {
+    try {
+      const stored = localStorage.getItem(DEVICE_ID_KEY)
+      if (stored) return stored
+      const id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      localStorage.setItem(DEVICE_ID_KEY, id)
+      return id
+    } catch {
+      return `device-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    }
+  }
+
+  private emitMergedPages() {
+    const slots = [...this.v2Slots, ...(this.legacySlot ? [this.legacySlot] : [])]
+    const merged = mergePageSnapshots(slots)
+    this.pagesReceived = true
+    this.onPages(merged)
   }
 
   start() {
     if (!rtdb) return
 
-    const pagesRef = ref(rtdb, `${BOOK_PATH}/pages`)
-    this.unsubPages = onValue(pagesRef, (snap) => {
-      if (this.writingPages) return
+    const pagesRootRef = ref(rtdb, PAGES_PATH)
+    this.unsubPages = onValue(pagesRootRef, (snap) => {
+      this.v2Slots = []
       const val = snap.val()
-      if (val && val._source !== this.deviceId && Array.isArray(val.data)) {
-        this.pagesReceived = true
-        this.onPages(val.data)
+      if (val) {
+        for (const key of Object.keys(val)) {
+          const slot = val[key]
+          if (!slot || !Array.isArray(slot.data)) continue
+          this.v2Slots.push({ pages: slot.data, updatedAt: slot.updatedAt ?? 0, deviceId: key })
+        }
       }
+      this.emitMergedPages()
+    })
+
+    // The legacy single-slot book written by the previous sync design is
+    // treated as one more device slot so its content (e.g. edits made by
+    // browsers still running the old bundle) is merged in, never orphaned.
+    const legacyRef = ref(rtdb, `${BOOK_PATH}/pages`)
+    this.unsubLegacy = onValue(legacyRef, (snap) => {
+      const val = snap.val()
+      if (val && Array.isArray(val.data) && val.data.length > 0) {
+        this.legacySlot = {
+          pages: val.data,
+          updatedAt: val.updatedAt ?? 0,
+          deviceId: String(val._source ?? 'legacy'),
+        }
+      } else {
+        this.legacySlot = null
+      }
+      this.emitMergedPages()
     })
 
     const metaRef = ref(rtdb, `${BOOK_PATH}/metadata`)
@@ -78,7 +132,7 @@ export class FirebaseSync {
 
   destroy() {
     if (this.unsubPages) {
-      off(ref(rtdb!, `${BOOK_PATH}/pages`))
+      off(ref(rtdb!, PAGES_PATH))
       this.unsubPages = null
     }
     if (this.unsubMetadata) {
@@ -88,6 +142,10 @@ export class FirebaseSync {
     if (this.unsubOps) {
       off(ref(rtdb!, `${BOOK_PATH}/ops`))
       this.unsubOps = null
+    }
+    if (this.unsubLegacy) {
+      off(ref(rtdb!, `${BOOK_PATH}/pages`))
+      this.unsubLegacy = null
     }
     if (this.broadcastThrottleTimer) {
       clearTimeout(this.broadcastThrottleTimer)
@@ -119,8 +177,8 @@ export class FirebaseSync {
     this.lastPagesBroadcast = Date.now()
     this.writingPages = true
     try {
-      const pagesRef = ref(rtdb, `${BOOK_PATH}/pages`)
-      await set(pagesRef, { data: pages, _source: this.deviceId, updatedAt: Date.now() })
+      const slotRef = ref(rtdb, `${PAGES_PATH}/${this.deviceId}`)
+      await set(slotRef, { data: pages, updatedAt: Date.now() })
       if (Date.now() - this.lastAutoCheckpoint >= 60000) {
         this.lastAutoCheckpoint = Date.now()
         this.saveCheckpoint(pages, 'Auto').catch(() => {})
@@ -128,6 +186,24 @@ export class FirebaseSync {
     } finally {
       this.writingPages = false
     }
+    this.pruneStaleSlots().catch(() => {})
+  }
+
+  private async pruneStaleSlots() {
+    if (!rtdb) return
+    try {
+      const snap = await get(ref(rtdb, PAGES_PATH))
+      if (!snap.exists()) return
+      const cutoff = Date.now() - STALE_SLOT_MS
+      const deletes: Promise<void>[] = []
+      snap.forEach((child) => {
+        const val = child.val()
+        if (child.key !== this.deviceId && val && (!val.updatedAt || val.updatedAt < cutoff)) {
+          deletes.push(set(ref(rtdb!, `${PAGES_PATH}/${child.key}`), null))
+        }
+      })
+      await Promise.all(deletes)
+    } catch { /* pruning is best-effort */ }
   }
 
   async broadcastMetadata(metadata: JournalMetadata) {
