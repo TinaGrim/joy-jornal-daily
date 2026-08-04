@@ -1,4 +1,4 @@
-import { ref, onValue, set, off, get, push, query, limitToLast, onChildAdded, type Unsubscribe } from 'firebase/database'
+import { ref, onValue, set, update, off, get, push, query, limitToLast, onChildAdded, type Unsubscribe } from 'firebase/database'
 import { rtdb } from '@/lib/firebase'
 import type { Page } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
@@ -40,6 +40,7 @@ export class FirebaseSync {
   private lastPagesBroadcast = 0
   private pendingPages: Page[] | null = null
   private broadcastThrottleTimer: ReturnType<typeof setTimeout> | null = null
+  private lastWrittenPages: Page[] | null = null
 
   constructor(
     onPages: (pages: Page[]) => void,
@@ -178,7 +179,26 @@ export class FirebaseSync {
     this.writingPages = true
     try {
       const slotRef = ref(rtdb, `${PAGES_PATH}/${this.deviceId}`)
-      await set(slotRef, { data: pages, updatedAt: Date.now() })
+      const now = Date.now()
+      if (!this.lastWrittenPages) {
+        // First write of this session: full book.
+        await set(slotRef, { data: pages, updatedAt: now })
+      } else {
+        // Subsequent writes: only send the pages that actually changed,
+        // so a 6 MB book doesn't get re-uploaded on every edit.
+        const updates: Record<string, unknown> = { updatedAt: now }
+        const common = Math.min(this.lastWrittenPages.length, pages.length)
+        for (let i = 0; i < common; i++) {
+          if (JSON.stringify(this.lastWrittenPages[i]) !== JSON.stringify(pages[i])) {
+            updates[`data/${i}`] = pages[i]
+          }
+        }
+        for (let i = common; i < pages.length; i++) {
+          updates[`data/${i}`] = pages[i]
+        }
+        await update(slotRef, updates)
+      }
+      this.lastWrittenPages = pages
       if (Date.now() - this.lastAutoCheckpoint >= 60000) {
         this.lastAutoCheckpoint = Date.now()
         this.saveCheckpoint(pages, 'Auto').catch(() => {})
@@ -232,9 +252,10 @@ export class FirebaseSync {
       const stripped = pages.map(p => ({
         ...p,
         elements: p.elements.filter(el => !el.data?._deleted).map(el => {
-          const { _updatedAt, ...rest } = el.data as Record<string, unknown>
-          const data = Object.keys(rest).length ? rest : el.data
-          return { ...el, data }
+          const data = el.data as Record<string, unknown> | undefined
+          if (!data) return { ...el, data: {} }
+          const { _updatedAt, ...rest } = data
+          return { ...el, data: Object.keys(rest).length ? rest : data }
         }),
       }))
       const historyMetaRef = ref(rtdb, `${BOOK_PATH}/history-meta`)
