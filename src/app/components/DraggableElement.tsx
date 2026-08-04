@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import type { CanvasElement } from '@/types/journal'
 import { useJournal } from '../contexts/JournalContext'
@@ -20,6 +21,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   const [isEditing, setIsEditing] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [isMoving, setIsMoving] = useState(false)
+  const [dragState, setDragState] = useState<{ x: number; y: number; scale: number } | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
   const menuAbove = element.y < 400
@@ -34,6 +36,8 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     rafId: null as number | null,
     batchIds: [] as string[],
     batchPositions: [] as { x: number; y: number }[],
+    viewOffsetX: 0,
+    viewOffsetY: 0,
   })
   const isSelected = selectedElementId === element.id
   const isMultiSelected = selectedElementIds.length > 0 && selectedElementIds.includes(element.id)
@@ -77,7 +81,10 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       rafId: null,
       batchIds,
       batchPositions,
+      viewOffsetX: e.clientX - rect.left,
+      viewOffsetY: e.clientY - rect.top,
     }
+    setDragState({ x: rect.left, y: rect.top, scale: rect.width / element.width })
     setIsMoving(true)
   }
 
@@ -90,8 +97,8 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
         moveRef.current.rafId = null
         const dx = (e.clientX - moveRef.current.startMouseX) / moveRef.current.scale
         const dy = (e.clientY - moveRef.current.startMouseY) / moveRef.current.scale
-        const newX = Math.max(0, Math.min(640 - moveRef.current.elemWidth, moveRef.current.startElemX + dx))
-        const newY = Math.max(0, Math.min(860 - moveRef.current.elemHeight, moveRef.current.startElemY + dy))
+        const newX = moveRef.current.startElemX + dx
+        const newY = moveRef.current.startElemY + dy
         const updates: Record<string, Partial<CanvasElement>> = {
           [element.id]: { x: newX, y: newY },
         }
@@ -105,6 +112,11 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           }
         }
         batchUpdateElements(updates, false, pageIndex)
+        setDragState(prev => prev ? {
+          ...prev,
+          x: e.clientX - moveRef.current.viewOffsetX,
+          y: e.clientY - moveRef.current.viewOffsetY,
+        } : prev)
       })
     }
 
@@ -114,18 +126,23 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
         moveRef.current.rafId = null
       }
 
-      const target = document.elementsFromPoint(e.clientX, e.clientY)
-        .find(el => el.hasAttribute('data-page-index'))
+      const pageEls = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]')).reverse()
+      const target = pageEls.find(el => {
+        const r = el.getBoundingClientRect()
+        return e.clientX >= r.left - 3 && e.clientX <= r.right + 3 && e.clientY >= r.top && e.clientY <= r.bottom
+      })
       if (target) {
         const toPage = parseInt(target.getAttribute('data-page-index')!)
         if (toPage !== pageIndex) {
           const rect = target.getBoundingClientRect()
-          const ew = moveRef.current.elemWidth
-          const eh = moveRef.current.elemHeight
-          const newX = Math.max(0, Math.min(640 - ew, (e.clientX - rect.left) / rect.width * 640 - ew / 2))
-          const newY = Math.max(0, Math.min(860 - eh, (e.clientY - rect.top) / rect.height * 860 - eh / 2))
+          const { elemWidth: ew, elemHeight: eh, scale, viewOffsetX, viewOffsetY } = moveRef.current
+          const ghostLeft = e.clientX - viewOffsetX + ew * (scale - 1) / 2
+          const ghostTop = e.clientY - viewOffsetY + eh * (scale - 1) / 2
+          const newX = Math.max(0, Math.min(640 - ew, (ghostLeft - rect.left) / rect.width * 640))
+          const newY = Math.max(0, Math.min(860 - eh, (ghostTop - rect.top) / rect.height * 860))
           transferElement(element.id, pageIndex, toPage, newX, newY)
           setFocusPageIndex(toPage)
+          setDragState(null)
           setIsMoving(false)
           return
         }
@@ -149,6 +166,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       }
       batchUpdateElements(updates, true, pageIndex)
 
+      setDragState(null)
       setIsMoving(false)
       flushSync()
     }
@@ -162,8 +180,10 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       if (moveRef.current.rafId !== null) {
         cancelAnimationFrame(moveRef.current.rafId)
       }
+      setDragState(null)
     }
-  }, [isMoving, element.id, element.width, element.height, element.rotation, updateElement, batchUpdateElements, transferElement, pageIndex, setFocusPageIndex, flushSync])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drag data captured in moveRef at mousedown; context identities (flushSync etc.) must not tear down listeners mid-drag
+  }, [isMoving])
 
   useEffect(() => {
     if (isEditing && textRef.current) {
@@ -652,29 +672,11 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     e.stopPropagation()
   }
 
-  return (
-    <div
-      ref={elementRefCallback}
-      data-elem-id={element.id}
-      onMouseDown={handleMouseDown}
-      onClick={e => { e.stopPropagation(); setSelectedElementId(element.id) }}
-      style={{
-        position: 'absolute', left: element.x, top: element.y,
-        width: element.width, height: element.height,
-        transform: elementTransform,
-        opacity: isMoving ? 0.85 : 1,
-        willChange: isMoving ? 'transform' : 'auto',
-        pointerEvents: drawSettings.active ? 'none' : undefined,
-        cursor: drawSettings.active ? 'crosshair' : isEditing ? 'text' : 'default',
-        outline: isSelected && element.type !== 'drawing' ? '2px solid #d97757' : isMultiSelected && element.type !== 'drawing' ? '1.5px dashed rgba(139,115,85,0.35)' : 'none',
-        outlineOffset: '4px',
-        transition: 'opacity 0.15s',
-        zIndex: isMoving ? 9999 : isSelected ? 9998 : 'auto',
-      }}
-    >
+  const elementContent = (
+    <>
       {renderElement()}
 
-      {isSelected && !isEditing && (
+      {isSelected && !isEditing && !isMoving && (
         <>
           {element.type !== 'drawing' && ['nw', 'ne', 'sw', 'se'].map(corner => (
             <div
@@ -792,6 +794,52 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           </div>
         </>
       )}
-    </div>
+    </>
+  )
+
+  const portal = isMoving && dragState ? createPortal(
+    <div
+      style={{
+        position: 'fixed',
+        left: dragState.x + element.width * (dragState.scale - 1) / 2,
+        top: dragState.y + element.height * (dragState.scale - 1) / 2,
+        width: element.width,
+        height: element.height,
+        transform: `scale(${dragState.scale}) rotate(${element.rotation}deg)`,
+        transformOrigin: 'center center',
+        opacity: 0.85,
+        zIndex: 99999,
+        pointerEvents: 'none',
+      }}
+    >
+      {renderElement()}
+    </div>,
+    document.body
+  ) : null
+
+  return (
+    <>
+      {portal}
+      <div
+        ref={elementRefCallback}
+        data-elem-id={element.id}
+        onMouseDown={handleMouseDown}
+        onClick={e => { e.stopPropagation(); setSelectedElementId(element.id) }}
+        style={{
+          position: 'absolute', left: element.x, top: element.y,
+          width: element.width, height: element.height,
+          transform: elementTransform,
+          opacity: isMoving ? 0 : 1,
+          pointerEvents: drawSettings.active ? 'none' : undefined,
+          cursor: drawSettings.active ? 'crosshair' : isEditing ? 'text' : 'default',
+          outline: isSelected && element.type !== 'drawing' ? '2px solid #d97757' : isMultiSelected && element.type !== 'drawing' ? '1.5px dashed rgba(139,115,85,0.35)' : 'none',
+          outlineOffset: '4px',
+          transition: 'opacity 0.15s',
+          zIndex: isSelected ? 9998 : 'auto',
+        }}
+      >
+        {elementContent}
+      </div>
+    </>
   )
 }

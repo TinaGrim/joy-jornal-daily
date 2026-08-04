@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { cn } from '@/lib/utils'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -37,9 +37,10 @@ function ShapePreview({ id, clipPath, round, fill }: { id: ShapeType; clipPath?:
 }
 
 function DraggableShape({ shape, fill, isDark }: { shape: ShapeType; fill: string; isDark: boolean }) {
+  const data = useMemo(() => ({ shape, fill, opacity: 0.85 }), [shape, fill])
   const { isDragging, drag } = useToolDrag({
     elementType: 'shape',
-    data: { shape, fill, opacity: 0.85 },
+    data,
     width: 120,
     height: 120,
   })
@@ -64,9 +65,10 @@ function DraggableShape({ shape, fill, isDark }: { shape: ShapeType; fill: strin
 }
 
 function DraggableIcon({ icon: Icon, label, isDark }: { icon: typeof Plane; label: string; name: string; isDark: boolean }) {
+  const data = useMemo(() => ({ shape: 'icon', icon: label, fill: '#2c3e50', opacity: 1 }), [label])
   const { isDragging, drag } = useToolDrag({
     elementType: 'shape',
-    data: { shape: 'icon', icon: label, fill: '#2c3e50', opacity: 1 },
+    data,
     width: 80,
     height: 80,
   })

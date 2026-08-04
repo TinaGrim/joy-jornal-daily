@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { cn } from '@/lib/utils'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -69,9 +69,10 @@ const categories: Category[] = [
 ]
 
 function DraggableSticker({ emoji, label, isDark }: { emoji: string; label: string; isDark: boolean }) {
+  const data = useMemo(() => ({ src: emoji, label, category: '' }), [emoji, label])
   const { isDragging, drag } = useToolDrag({
     elementType: 'sticker',
-    data: { src: emoji, label, category: '' },
+    data,
     width: 100,
     height: 100,
   })

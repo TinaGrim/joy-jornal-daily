@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -80,9 +80,10 @@ function TemplateCard({ template, isDark }: { template: Template; isDark: boolea
     setApplied(!!templateBackup[key])
   }, [key])
 
+  const data = useMemo(() => ({ templateId: template.id }), [template.id])
   const { isDragging, drag } = useToolDrag({
     elementType: 'template',
-    data: { templateId: template.id },
+    data,
     width: 400,
     height: 300,
   })

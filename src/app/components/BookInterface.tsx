@@ -260,7 +260,7 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
               style={{ transform: 'rotateY(-1.5deg)', transformStyle: 'preserve-3d' }}
             >
               <div
-                className="relative overflow-clip rounded-s-2xl"
+                className="relative overflow-visible rounded-s-2xl"
                 style={{
                   width: PAGE_W,
                   height: PAGE_H,
@@ -277,7 +277,7 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
               </div>
 
               <div
-                className="relative z-10"
+                className="relative z-10 pointer-events-none"
                 style={{
                   width: '6px',
                   height: PAGE_H,
@@ -295,7 +295,7 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
               </div>
 
               <div
-                className="relative overflow-clip rounded-e-2xl"
+                className="relative overflow-visible rounded-e-2xl"
                 style={{
                   width: PAGE_W,
                   height: PAGE_H,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Mail, PenLine } from 'lucide-react'
@@ -17,9 +17,11 @@ export default function EnvelopePanel() {
   const { theme } = useTheme()
   const isDark = theme === 'night'
 
+  const data = useMemo(() => ({ opened: false, note: '', color: envelopeColor }), [envelopeColor])
+
   const { isDragging, drag } = useToolDrag({
     elementType: 'envelope',
-    data: { opened: false, note: '', color: envelopeColor },
+    data,
     width: 160,
     height: 120,
   })

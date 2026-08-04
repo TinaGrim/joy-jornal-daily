@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { Type, ArrowRight } from 'lucide-react'
@@ -21,14 +21,16 @@ export default function TextPanel() {
   const { theme } = useTheme()
   const isDark = theme === 'night'
 
+  const data = useMemo(() => ({
+    text: textInput || 'Your text',
+    font: selectedFont,
+    fontSize,
+    color: selectedColor,
+  }), [textInput, selectedFont, fontSize, selectedColor])
+
   const { isDragging, drag } = useToolDrag({
     elementType: 'text',
-    data: {
-      text: textInput || 'Your text',
-      font: selectedFont,
-      fontSize,
-      color: selectedColor,
-    },
+    data,
     width: 200,
     height: 60,
   })

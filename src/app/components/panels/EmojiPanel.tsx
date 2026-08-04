@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -19,9 +19,11 @@ function normalizeEmoji(e: string) {
 }
 
 function EmojiItem({ emoji, isDark }: { emoji: string; isDark: boolean }) {
+  const normalizedEmoji = useMemo(() => normalizeEmoji(emoji), [emoji])
+  const data = useMemo(() => ({ emoji: normalizedEmoji }), [normalizedEmoji])
   const { isDragging, drag } = useToolDrag({
     elementType: 'emoji',
-    data: { emoji: normalizeEmoji(emoji) },
+    data,
     width: 80,
     height: 80,
   })

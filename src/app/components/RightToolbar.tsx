@@ -65,7 +65,6 @@ export default function RightToolbar() {
     const monitor = manager.getMonitor()
     const unsubscribe = monitor.subscribeToStateChange(() => {
       if (monitor.isDragging() && monitor.getItemType() === 'TOOL_ITEM') {
-        setActivePanel(null)
         setOpen(false)
       }
     })

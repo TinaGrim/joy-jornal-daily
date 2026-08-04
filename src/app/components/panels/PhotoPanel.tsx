@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useMemo } from 'react'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useJournal } from '../../contexts/JournalContext'
@@ -22,9 +22,10 @@ interface UploadedPhoto {
 }
 
 function PhotoThumbnail({ photo, mask, isDark }: { photo: UploadedPhoto; mask: ShapeMask; isDark: boolean }) {
+  const data = useMemo(() => ({ src: photo.src, mask }), [photo.src, mask])
   const { isDragging, drag } = useToolDrag({
     elementType: 'image',
-    data: { src: photo.src, mask },
+    data,
     width: 150,
     height: 150,
   })

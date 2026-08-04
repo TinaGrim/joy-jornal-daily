@@ -108,7 +108,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     }
   }, [])
 
-  const [, drop] = useDrop({
+  const [, drop] = useDrop(() => ({
     accept: ['TOOL_ITEM', 'CANVAS_ELEMENT'],
     drop: (item: DropItem, monitor) => {
       if (!isActive) return
@@ -148,7 +148,12 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
         }
       }
     },
-  })
+  }), [isActive, pageIndex, setFocusPageIndex, addElement, updateElement, transferElement])
+
+  const setCanvasRef = useCallback((node: HTMLDivElement | null) => {
+    canvasRef.current = node
+    drop(node as never)
+  }, [drop])
 
   const getCanvasPos = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect()
@@ -283,7 +288,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
 
   return (
     <div
-      ref={node => { canvasRef.current = node; drop(node) }}
+      ref={setCanvasRef}
       data-page-index={pageIndex}
       className={`w-full h-full relative z-10 overflow-visible select-none touch-none ${side === 'left' ? 'rounded-s-2xl' : side === 'right' ? 'rounded-e-2xl' : ''}`}
       style={{ background: page.background, touchAction: 'none' as const }}
