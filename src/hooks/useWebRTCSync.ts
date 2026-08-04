@@ -21,6 +21,7 @@ interface RemoteCursor {
 interface UseWebRTCSyncReturn {
   pages: Page[]
   loading: boolean
+  cloudChecked: boolean
   error: Error | null
   savePages: (pages: Page[]) => void
   flushPages: () => void
@@ -114,6 +115,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
 export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
   const [pages, setPages] = useState<Page[]>([])
   const [loading, setLoading] = useState(true)
+  const [cloudChecked, setCloudChecked] = useState(false)
   const [error] = useState<Error | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [remoteCursors, setRemoteCursors] = useState<Omit<RemoteCursor, 'updatedAt'>[]>([])
@@ -184,6 +186,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
   const onIncomingFBPages = useCallback((incomingPages: Page[]) => {
     if (!firstCloudDataRef.current) {
       firstCloudDataRef.current = true
+      setCloudChecked(true)
       setLoading(false)
     }
     applyIncomingPages(incomingPages)
@@ -314,6 +317,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
   return {
     pages,
     loading,
+    cloudChecked,
     error,
     savePages,
     flushPages,

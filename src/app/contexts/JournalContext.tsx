@@ -294,15 +294,23 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    initializedRef.current = true
-    if (sync.pages.length === 0) {
+    // Only publish local pages once Firebase has confirmed the cloud is
+    // actually empty (cloudChecked). After the 10s offline fallback the
+    // cloud state is unknown, and seeding would enshrine a stale book.
+    if (sync.pages.length === 0 && sync.cloudChecked) {
+      initializedRef.current = true
       console.log('[JournalContext] no cloud data yet, publishing local pages')
       // First device online: publish this origin's data so every origin
       // converges on one shared book instead of per-origin copies.
       sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current)))
+    } else if (sync.cloudChecked) {
+      // Cloud confirmed and non-empty: the adopt effect merges it in.
+      initializedRef.current = true
     }
+    // Otherwise the cloud state is still unknown (offline fallback);
+    // stay uninitialized and decide when the first snapshot arrives.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: publish local data once cloud becomes available
-  }, [isAuthenticated, sync.loading])
+  }, [isAuthenticated, sync.loading, sync.cloudChecked])
 
   useEffect(() => {
     if (!initializedRef.current) return

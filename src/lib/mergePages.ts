@@ -64,7 +64,31 @@ export function mergePageSnapshots(slots: PageSnapshot[]): Page[] {
       .filter(el => !(el.data?._deleted && now - elementTimestamp(el) > TOMBSTONE_RETENTION_MS))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-    merged.push({ ...newestPage, elements })
+    // Collapse duplicate photos: the same image `src` is the same photo even
+    // when divergent device copies re-uploaded it under a different element
+    // id. Prefer a live copy over a tombstone (deleting one duplicate copy
+    // must not delete the photo); among live copies the newest wins.
+    const srcSeen = new Map<string, CanvasElement>()
+    const unique: CanvasElement[] = []
+    for (const el of elements) {
+      const src = el.type === 'image' ? el.data?.src : null
+      if (typeof src === 'string' && srcSeen.has(src)) {
+        const existing = srcSeen.get(src)!
+        const elDeleted = !!el.data?._deleted
+        const existingDeleted = !!existing.data?._deleted
+        const replace = (!elDeleted && existingDeleted)
+          || (!elDeleted && !existingDeleted && elementTimestamp(el) > elementTimestamp(existing))
+        if (replace) {
+          unique[unique.indexOf(existing)] = el
+          srcSeen.set(src, el)
+        }
+        continue
+      }
+      if (typeof src === 'string') srcSeen.set(src, el)
+      unique.push(el)
+    }
+
+    merged.push({ ...newestPage, elements: unique })
   }
 
   return merged
