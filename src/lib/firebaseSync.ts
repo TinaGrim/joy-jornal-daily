@@ -1,5 +1,6 @@
-import { ref, onValue, set, update, off, get, push, query, limitToLast, onChildAdded, type Unsubscribe } from 'firebase/database'
+import { ref, onValue, set, update, off, get, push, query, limitToLast, onChildAdded, serverTimestamp, type Unsubscribe } from 'firebase/database'
 import { rtdb } from '@/lib/firebase'
+import { setServerOffset } from '@/lib/journalClock'
 import type { Page } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 import { mergePageSnapshots } from '@/lib/mergePages'
@@ -7,7 +8,9 @@ import { mergePageSnapshots } from '@/lib/mergePages'
 const BOOK_PATH = 'journal/shared'
 const PAGES_PATH = 'journal/v2/pages'
 const MAX_HISTORY = 50
-const STALE_SLOT_MS = 7 * 24 * 60 * 60 * 1000
+// Slots are only pruned when untouched for 30 days AND fully superseded by
+// the current book, so an origin's content is never silently dropped.
+const STALE_SLOT_MS = 30 * 24 * 60 * 60 * 1000
 const DEVICE_ID_KEY = 'journal_device_id'
 
 export interface CheckpointInfo {
@@ -41,15 +44,26 @@ export class FirebaseSync {
   private pendingPages: Page[] | null = null
   private broadcastThrottleTimer: ReturnType<typeof setTimeout> | null = null
   private lastWrittenPages: Page[] | null = null
+  private onConnectionChange: ((connected: boolean) => void) | null
+  private onError: ((message: string) => void) | null
+  private unsubConnection: Unsubscribe | null = null
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryBackoffMs = 1000
+  private retryPages: Page[] | null = null
+  private lastErrorNotified = 0
 
   constructor(
     onPages: (pages: Page[]) => void,
     onMetadata: (metadata: JournalMetadata | null) => void,
     onOperation?: (operation: SyncOperation) => void,
+    onConnectionChange?: (connected: boolean) => void,
+    onError?: (message: string) => void,
   ) {
     this.onPages = onPages
     this.onMetadata = onMetadata
     this.onOperation = onOperation ?? null
+    this.onConnectionChange = onConnectionChange ?? null
+    this.onError = onError ?? null
     this.deviceId = this.getStableDeviceId()
   }
 
@@ -129,6 +143,14 @@ export class FirebaseSync {
         }
       })
     }
+
+    const connRef = ref(rtdb, '.info/connected')
+    this.unsubConnection = onValue(connRef, (snap) => {
+      this.onConnectionChange?.(snap.val() === true)
+    })
+
+    this.probeServerTime()
+    this.recoverPending()
   }
 
   destroy() {
@@ -152,6 +174,11 @@ export class FirebaseSync {
       clearTimeout(this.broadcastThrottleTimer)
       this.broadcastThrottleTimer = null
     }
+    if (this.unsubConnection) {
+      off(ref(rtdb!, '.info/connected'))
+      this.unsubConnection = null
+    }
+    this.cancelRetryTimer()
   }
 
   async broadcastPages(pages: Page[]) {
@@ -177,16 +204,16 @@ export class FirebaseSync {
     if (!rtdb) return
     this.lastPagesBroadcast = Date.now()
     this.writingPages = true
+    this.persistPending(pages)
     try {
       const slotRef = ref(rtdb, `${PAGES_PATH}/${this.deviceId}`)
-      const now = Date.now()
       if (!this.lastWrittenPages) {
         // First write of this session: full book.
-        await set(slotRef, { data: pages, updatedAt: now })
+        await set(slotRef, { data: pages, updatedAt: serverTimestamp() })
       } else {
         // Subsequent writes: only send the pages that actually changed,
         // so a 6 MB book doesn't get re-uploaded on every edit.
-        const updates: Record<string, unknown> = { updatedAt: now }
+        const updates: Record<string, unknown> = { updatedAt: serverTimestamp() }
         const common = Math.min(this.lastWrittenPages.length, pages.length)
         for (let i = 0; i < common; i++) {
           if (JSON.stringify(this.lastWrittenPages[i]) !== JSON.stringify(pages[i])) {
@@ -198,18 +225,94 @@ export class FirebaseSync {
         }
         await update(slotRef, updates)
       }
+      this.clearPending()
       this.lastWrittenPages = pages
+      this.retryPages = null
+      this.retryBackoffMs = 1000
+      this.cancelRetryTimer()
       if (Date.now() - this.lastAutoCheckpoint >= 60000) {
         this.lastAutoCheckpoint = Date.now()
         this.saveCheckpoint(pages, 'Auto').catch(() => {})
       }
+      this.pruneStaleSlots(pages).catch(() => {})
+    } catch {
+      this.retryPages = pages
+      this.notifyError('Sync failed — will retry automatically')
+      this.scheduleRetry()
+      this.retryBackoffMs = Math.min(this.retryBackoffMs * 2, 30000)
     } finally {
       this.writingPages = false
     }
-    this.pruneStaleSlots().catch(() => {})
   }
 
-  private async pruneStaleSlots() {
+  private persistPending(pages: Page[]) {
+    try {
+      localStorage.setItem('journal_pending_pages', JSON.stringify(pages))
+    } catch { /* storage may be unavailable */ }
+  }
+
+  private clearPending() {
+    try {
+      localStorage.removeItem('journal_pending_pages')
+    } catch { /* storage may be unavailable */ }
+  }
+
+  private recoverPending() {
+    if (!rtdb) return
+    try {
+      const raw = localStorage.getItem('journal_pending_pages')
+      if (!raw) return
+      const pending: unknown = JSON.parse(raw)
+      if (Array.isArray(pending) && pending.length > 0) {
+        this.flushPages(pending).catch(() => {})
+      }
+    } catch { /* best-effort replay */ }
+  }
+
+  private async probeServerTime() {
+    if (!rtdb) return
+    try {
+      const clockRef = push(ref(rtdb, 'journal/v2/clock'), serverTimestamp())
+      await clockRef
+      const snap = await get(clockRef)
+      const serverValue = snap.val()
+      if (typeof serverValue === 'number') {
+        setServerOffset(serverValue - Date.now())
+      }
+      await set(clockRef, null)
+    } catch { /* best-effort clock probe */ }
+  }
+
+  private scheduleRetry() {
+    this.cancelRetryTimer()
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      if (this.writingPages) {
+        this.scheduleRetry()
+        return
+      }
+      if (this.retryPages) {
+        this.flushPages(this.retryPages)
+      }
+    }, this.retryBackoffMs)
+  }
+
+  private cancelRetryTimer() {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+  }
+
+  private notifyError(message: string) {
+    const now = Date.now()
+    if (now - this.lastErrorNotified >= 15000) {
+      this.lastErrorNotified = now
+      this.onError?.(message)
+    }
+  }
+
+  private async pruneStaleSlots(pages: Page[]) {
     if (!rtdb) return
     try {
       const snap = await get(ref(rtdb, PAGES_PATH))
@@ -218,12 +321,29 @@ export class FirebaseSync {
       const deletes: Promise<void>[] = []
       snap.forEach((child) => {
         const val = child.val()
-        if (child.key !== this.deviceId && val && (!val.updatedAt || val.updatedAt < cutoff)) {
+        if (child.key !== this.deviceId && val && Array.isArray(val.data)
+          && (!val.updatedAt || val.updatedAt < cutoff)
+          && this.isSuperseded(val.data, pages)) {
           deletes.push(set(ref(rtdb!, `${PAGES_PATH}/${child.key}`), null))
         }
       })
       await Promise.all(deletes)
     } catch { /* pruning is best-effort */ }
+  }
+
+  // A stale slot may only be deleted when every element it contains is
+  // already present in the current book; otherwise its content would be
+  // lost from the shared journal.
+  private isSuperseded(stale: Page[], current: Page[]): boolean {
+    for (let i = 0; i < stale.length; i++) {
+      const stalePage = stale[i]
+      if (!stalePage || !stalePage.elements?.length) continue
+      const currentIds = new Set((current[i]?.elements ?? []).map(el => el.id))
+      for (const el of stalePage.elements) {
+        if (!currentIds.has(el.id)) return false
+      }
+    }
+    return true
   }
 
   async broadcastMetadata(metadata: JournalMetadata) {
@@ -400,6 +520,8 @@ export function createFirebaseSync(
   onPages: (pages: Page[]) => void,
   onMetadata: (metadata: JournalMetadata | null) => void,
   onOperation?: (operation: SyncOperation) => void,
+  onConnectionChange?: (connected: boolean) => void,
+  onError?: (message: string) => void,
 ): FirebaseSync {
-  return new FirebaseSync(onPages, onMetadata, onOperation)
+  return new FirebaseSync(onPages, onMetadata, onOperation, onConnectionChange, onError)
 }

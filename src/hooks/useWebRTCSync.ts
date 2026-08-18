@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createSync, type BroadcastSync } from '@/lib/broadcastSync'
 import { createFirebaseSync, type FirebaseSync, type CheckpointInfo } from '@/lib/firebaseSync'
 import { isFirebaseReady } from '@/lib/firebase'
+import { journalNow } from '@/lib/journalClock'
 import type { Page, CanvasElement } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 
@@ -65,7 +66,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
       updated[pageIndex] = {
         ...updated[pageIndex],
         elements: (updated[pageIndex].elements ?? []).map(el =>
-          el.id === elementId ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+          el.id === elementId ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: journalNow() } } : el
         ),
       }
       return updated
@@ -75,8 +76,23 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
       if (!updated[fromPage] || !updated[toPage]) return pages
       const el = (updated[fromPage].elements ?? []).find(e => e.id === elementId)
       if (!el) return pages
-      updated[fromPage] = { ...updated[fromPage], elements: (updated[fromPage].elements ?? []).filter(e => e.id !== elementId) }
-      updated[toPage] = { ...updated[toPage], elements: [...(updated[toPage].elements ?? []), { ...el, x, y }] }
+      updated[fromPage] = {
+        ...updated[fromPage],
+        elements: (updated[fromPage].elements ?? []).map(e =>
+          e.id === elementId
+            ? { ...e, data: { ...e.data, _deleted: true, _updatedAt: journalNow() } }
+            : e
+        ),
+      }
+      const moved = { ...el, x, y, data: { ...el.data, _deleted: false, _updatedAt: journalNow() + 1 } }
+      const toElements = updated[toPage].elements ?? []
+      const existingIndex = toElements.findIndex(e => e.id === elementId)
+      updated[toPage] = {
+        ...updated[toPage],
+        elements: existingIndex >= 0
+          ? toElements.map(e => (e.id === elementId ? moved : e))
+          : [...toElements, moved],
+      }
       return updated
     }
     case 'page-add': {
@@ -102,7 +118,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
         ...updated[pageIndex],
         elements: (updated[pageIndex].elements ?? []).map(el => ({
           ...el,
-          data: { ...el.data, _deleted: true, _updatedAt: Date.now() },
+          data: { ...el.data, _deleted: true, _updatedAt: journalNow() },
         })),
       }
       return updated
@@ -112,7 +128,7 @@ function applyOperation(pages: Page[], operation: SyncOperation): Page[] {
   }
 }
 
-export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
+export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) => void): UseWebRTCSyncReturn {
   const [pages, setPages] = useState<Page[]>([])
   const [loading, setLoading] = useState(true)
   const [cloudChecked, setCloudChecked] = useState(false)
@@ -203,9 +219,9 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
 
     const bs = createSync(
       onIncomingPages,
-      (connected) => {
-        setIsConnected(connected)
-      },
+      // BroadcastChannel is same-origin only, not the cloud: it must not
+      // drive the reported connection state.
+      () => {},
       (cursor) => {
         cursorsRef.current.set(cursor.userId, {
           id: cursor.userId,
@@ -227,7 +243,15 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
 
     let fbSync: FirebaseSync | null = null
     if (isFirebaseReady) {
-      fbSync = createFirebaseSync(onIncomingFBPages, onIncomingMetadata, onIncomingFBOp)
+      fbSync = createFirebaseSync(
+        onIncomingFBPages,
+        onIncomingMetadata,
+        onIncomingFBOp,
+        (connected) => {
+          setIsConnected(connected)
+        },
+        onSyncError,
+      )
       fbSync.start()
       fbSyncRef.current = fbSync
     } else {
@@ -261,7 +285,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
       clearInterval(cleanup)
       clearTimeout(fallbackTimer)
     }
-  }, [enabled, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata, onIncomingFBPages])
+  }, [enabled, onSyncError, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata, onIncomingFBPages])
 
   const savePages = useCallback((newPages: Page[]) => {
     setPages(newPages)
@@ -280,7 +304,7 @@ export function useWebRTCSync(enabled: boolean): UseWebRTCSyncReturn {
 
   const broadcastOperation = useCallback((operation: SyncOperation) => {
     const uid = operation._uid || `${deviceIdRef.current}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-    const enriched: SyncOperation = { ...operation, _uid: uid, _createdAt: Date.now() }
+    const enriched: SyncOperation = { ...operation, _uid: uid, _createdAt: journalNow() }
     seenOpUids.current.add(uid)
     syncRef.current?.broadcastOperation(enriched)
     fbSyncRef.current?.broadcastOperation(enriched)

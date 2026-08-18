@@ -29,5 +29,6 @@ try {
   console.warn('[Firebase] Failed to initialize Firebase:', error)
   console.warn('[Firebase] Set VITE_FIREBASE_* environment variables in .env.local')
 }
+console.info(`[Firebase] project: ${firebaseConfig.projectId ?? '(missing)'}`)
 
 export { app, rtdb, auth, storage, isFirebaseReady }

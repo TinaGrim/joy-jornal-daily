@@ -26,16 +26,19 @@ function pageTimestamp(page: Page): number {
  * Per element id the copy with the newest `_updatedAt` wins; deleted
  * elements are tombstones (`data._deleted`) so they never resurrect from
  * a stale device slot. Stale tombstones older than a month are pruned.
- * Elements are sorted by id so the output is deterministic across devices.
+ * Slots are ordered by deviceId so ties resolve identically on every
+ * client regardless of snapshot arrival order, and elements are sorted by
+ * id so the output is deterministic across devices.
  */
 export function mergePageSnapshots(slots: PageSnapshot[]): Page[] {
   if (slots.length === 0) return []
-  const pageCount = Math.max(...slots.map(s => s.pages.length))
+  const ordered = [...slots].sort((a, b) => (a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0))
+  const pageCount = Math.max(...ordered.map(s => s.pages.length))
   const now = Date.now()
   const merged: Page[] = []
 
   for (let i = 0; i < pageCount; i++) {
-    const candidates = slots
+    const candidates = ordered
       .map(s => s.pages[i])
       .filter((p): p is Page => !!p)
     if (candidates.length === 0) continue

@@ -5,6 +5,7 @@ import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, Jour
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
 import { mergePageSnapshots } from '@/lib/mergePages'
+import { journalNow } from '@/lib/journalClock'
 import { useFirebaseAuth } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
 
@@ -88,6 +89,39 @@ function getDefaultPages(): Page[] {
     { id: 'page-1', background: '#f0e6d3', pattern: 'grid', gridSize: 40, elements: [] },
     { id: 'page-2', background: '#f0e6d3', pattern: 'grid', gridSize: 40, elements: [] },
   ]
+}
+
+// True when the local book is still the untouched default template
+// (fresh browser / cleared localStorage). Such a book must never be
+// published to the cloud: it would become the canonical book for every
+// other origin and replace their real content.
+function isDefaultTemplate(pages: Page[]): boolean {
+  const stripMeta = (data: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+    if (!data) return undefined
+    const rest = { ...data }
+    delete rest._updatedAt
+    delete rest._deleted
+    return rest
+  }
+  const canonical = (p: Page) => ({
+    id: p.id,
+    background: p.background,
+    pattern: p.pattern,
+    gridSize: p.gridSize,
+    elements: (p.elements ?? [])
+      .map(el => ({
+        id: el.id, type: el.type, x: el.x, y: el.y,
+        width: el.width, height: el.height, rotation: el.rotation, zIndex: el.zIndex,
+        data: stripMeta(el.data),
+      }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
+  })
+  const stripDeleted = (p: Page) => ({
+    ...p,
+    elements: (p.elements ?? []).filter(el => !el.data?._deleted),
+  })
+  return JSON.stringify(pages.map(p => canonical(stripDeleted(p))))
+    === JSON.stringify(getDefaultPages().map(canonical))
 }
 
 interface JournalContextType {
@@ -214,7 +248,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
   }, [fbSignOut])
 
-  const sync = useWebRTCSync(isAuthenticated)
+  const sync = useWebRTCSync(isAuthenticated, useCallback((msg: string) => {
+    toast.error(msg, { duration: 5000 })
+  }, []))
   const syncLoading = isAuthenticated && fbAuthenticated && sync.loading
   const syncLatency = sync.lastLatency
   const syncPeakLatency = sync.peakLatency
@@ -297,12 +333,20 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     // Only publish local pages once Firebase has confirmed the cloud is
     // actually empty (cloudChecked). After the 10s offline fallback the
     // cloud state is unknown, and seeding would enshrine a stale book.
+    const local = deduplicatePageElements(sanitizePages(pagesRef.current))
     if (sync.pages.length === 0 && sync.cloudChecked) {
       initializedRef.current = true
+      if (isDefaultTemplate(local)) {
+        // Fresh origin showing the untouched template: there is nothing
+        // worth publishing, and seeding it would make the default book
+        // canonical for every origin. Stay local until the user edits.
+        console.log('[JournalContext] cloud empty but local book is the default template, not seeding')
+        return
+      }
       console.log('[JournalContext] no cloud data yet, publishing local pages')
       // First device online: publish this origin's data so every origin
       // converges on one shared book instead of per-origin copies.
-      sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current)))
+      sync.savePages(local)
     } else if (sync.cloudChecked) {
       // Cloud confirmed and non-empty: the adopt effect merges it in.
       initializedRef.current = true
@@ -316,19 +360,26 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!initializedRef.current) return
     if (sync.pages.length === 0) return
     const incoming = deduplicatePageElements(sanitizePages(sync.pages))
+    const local = deduplicatePageElements(sanitizePages(pagesRef.current))
     // Merge the cloud book with this origin's local book instead of
     // replacing it, so edits made while offline (or on the old sync
     // design) are never lost; per element the newest `_updatedAt` wins.
     const merged = mergePageSnapshots([
       { pages: incoming, updatedAt: 0, deviceId: 'cloud' },
-      { pages: deduplicatePageElements(sanitizePages(pagesRef.current)), updatedAt: 0, deviceId: 'local' },
+      { pages: local, updatedAt: 0, deviceId: 'local' },
     ])
     const canonical = (pages: Page[]) =>
       pages.map(p => ({ ...p, elements: [...(p.elements ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) }))
     if (JSON.stringify(canonical(pagesRef.current)) === JSON.stringify(canonical(merged))) return
     setPages(merged)
     savePagesToStorage(merged)
-  }, [sync.pages])
+    // Publish the converged book back to this origin's cloud slot, so every
+    // origin's slot converges on the same content instead of each origin
+    // retaining a divergent copy. Never publish the untouched template.
+    if (!isDefaultTemplate(local)) {
+      sync.savePages(merged)
+    }
+  }, [sync.pages, sync.savePages])
 
   const hadLocalMetadataRef = useRef(!!loadMetadataFromStorage())
 
@@ -433,17 +484,34 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       savePagesToStorage(pagesRef.current)
       storageTimerRef.current = null
     }, 2000)
-    if (syncEnabled && sync.isConnected) {
+    if (syncEnabled) {
       sync.savePages(next)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sync.isConnected, sync.savePages])
+  }, [sync.savePages])
+
+  useEffect(() => {
+    const persistNow = () => {
+      savePagesToStorage(pagesRef.current)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') persistNow()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('beforeunload', persistNow)
+    window.addEventListener('pagehide', persistNow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('beforeunload', persistNow)
+      window.removeEventListener('pagehide', persistNow)
+    }
+  }, [])
 
   const addElement = useCallback((element: Omit<CanvasElement, 'id' | 'zIndex'>, pageIdx?: number) => {
     const newElement: CanvasElement = {
       ...element,
       id: `element-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      zIndex: Date.now(),
+      zIndex: journalNow(),
     }
     const idx = pageIdx ?? focusPageIndexRef.current
     savePages(prev => {
@@ -462,13 +530,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updated[idx] = {
         ...updated[idx],
         elements: updated[idx].elements.map(el =>
-          el.id === id ? { ...el, ...updates, data: { ...el.data, ...((updates as any).data || {}), [ELEMENT_TS_KEY]: Date.now() } } : el
+          el.id === id ? { ...el, ...updates, data: { ...el.data, ...((updates as any).data || {}), [ELEMENT_TS_KEY]: journalNow() } } : el
         ),
       }
       return updated
     }, syncEnabled)
     if (syncEnabled) {
-      sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId: id, patch: { ...updates, data: { ...((updates as any).data || {}), [ELEMENT_TS_KEY]: Date.now() } } })
+      sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId: id, patch: { ...updates, data: { ...((updates as any).data || {}), [ELEMENT_TS_KEY]: journalNow() } } })
     }
   }, [savePages, sync.broadcastOperation])
 
@@ -479,7 +547,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updated[idx] = {
         ...updated[idx],
         elements: updated[idx].elements.map(el =>
-          el.id === id ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+          el.id === id ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: journalNow() } } : el
         ),
       }
       return updated
@@ -495,7 +563,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       updated[idx] = {
         ...updated[idx],
         elements: updated[idx].elements.map(el =>
-          idSet.has(el.id) ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: Date.now() } } : el
+          idSet.has(el.id) ? { ...el, data: { ...el.data, _deleted: true, _updatedAt: journalNow() } } : el
         ),
       }
       return updated
@@ -594,7 +662,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       const element = updated[fromPage].elements.find(el => el.id === elementId)
       if (!element) return prev
-      const now = Date.now()
+      const now = journalNow()
       updated[fromPage] = {
         ...updated[fromPage],
         elements: updated[fromPage].elements.map(el =>
@@ -628,7 +696,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         ...updated[idx],
         elements: updated[idx].elements.map(el => ({
           ...el,
-          data: { ...el.data, _deleted: true, _updatedAt: Date.now() },
+          data: { ...el.data, _deleted: true, _updatedAt: journalNow() },
         })),
       }
       return updated
@@ -645,14 +713,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         elements: updated[idx].elements.map(el => {
           const up = updates[el.id]
           if (!up) return el
-          return { ...el, ...up, data: { ...el.data, ...(up.data || {}), [ELEMENT_TS_KEY]: Date.now() } }
+          return { ...el, ...up, data: { ...el.data, ...(up.data || {}), [ELEMENT_TS_KEY]: journalNow() } }
         }),
       }
       return updated
     }, syncEnabled)
     if (syncEnabled) {
       for (const elementId of Object.keys(updates)) {
-        sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId, patch: { ...updates[elementId], data: { ...(updates[elementId].data || {}), [ELEMENT_TS_KEY]: Date.now() } } })
+        sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId, patch: { ...updates[elementId], data: { ...(updates[elementId].data || {}), [ELEMENT_TS_KEY]: journalNow() } } })
       }
     }
   }, [savePages, sync.broadcastOperation])

@@ -1,6 +1,38 @@
 {
   "rules": {
     ".read": true,
-    ".write": true
+    ".write": true,
+    "journal": {
+      "v2": {
+        "pages": {
+          "$device": {
+            ".validate": "newData.val() === null || $device === '_clock' || (newData.hasChildren(['data', 'updatedAt']) && newData.child('data').isArray() && newData.child('updatedAt').isNumber())"
+          }
+        }
+      },
+      "shared": {
+        "pages": {
+          ".validate": "newData.val() === null || (newData.hasChildren(['data', 'updatedAt']) && newData.child('data').isArray() && newData.child('updatedAt').isNumber())"
+        },
+        "metadata": {
+          ".validate": "newData.val() === null || (newData.hasChild('data') && newData.child('data').hasChild('anniversaryDate') && newData.child('data').child('anniversaryDate').isString() && newData.child('updatedAt').isNumber())"
+        },
+        "ops": {
+          "$op": {
+            ".validate": "newData.val() === null || (newData.hasChild('op') && newData.child('createdAt').isNumber())"
+          }
+        },
+        "history-meta": {
+          "$id": {
+            ".validate": "newData.val() === null || newData.child('savedAt').isNumber()"
+          }
+        },
+        "history-data": {
+          "$id": {
+            ".validate": "newData.val() === null || (newData.hasChild('data') && newData.child('data').isArray())"
+          }
+        }
+      }
+    }
   }
 }

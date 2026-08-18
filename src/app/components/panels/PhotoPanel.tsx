@@ -1,4 +1,6 @@
 import { useRef, useState, useMemo } from 'react'
+import { uploadString, getDownloadURL, ref as storageRef } from 'firebase/storage'
+import { storage, auth, isFirebaseReady } from '@/lib/firebase'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useJournal } from '../../contexts/JournalContext'
@@ -62,23 +64,44 @@ export default function PhotoPanel() {
     fileInputRef.current?.click()
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const readFile = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    })
+
+  const uploadPhoto = async (file: File): Promise<UploadedPhoto> => {
+    const id = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const dataUrl = await readFile(file)
+    let src = dataUrl
+    if (isFirebaseReady && auth?.currentUser) {
+      try {
+        const ext = file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] ?? '.jpg'
+        const photoRef = storageRef(storage!, `photos/${auth.currentUser.uid}/${id}${ext}`)
+        await uploadString(photoRef, dataUrl, 'data_url')
+        src = await getDownloadURL(photoRef)
+      } catch (err) {
+        console.warn(`[PhotoPanel] Storage upload failed for ${file.name}, keeping local copy:`, err)
+      }
+    }
+    return { id, src, name: file.name }
+  }
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
     const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
-    let loaded = 0
-    const newPhotos: UploadedPhoto[] = []
-    imageFiles.forEach(file => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        newPhotos.push({ id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, src: reader.result as string, name: file.name })
-        loaded++
-        if (loaded === imageFiles.length) {
-          addUploadedPhotos(newPhotos)
-        }
-      }
-      reader.readAsDataURL(file)
-    })
+    const oversized = imageFiles.filter(f => f.size > 8 * 1024 * 1024)
+    oversized.forEach(f =>
+      console.warn(`[PhotoPanel] Skipping ${f.name}: ${(f.size / (1024 * 1024)).toFixed(1)}MB exceeds the 8MB limit`)
+    )
+    const validFiles = imageFiles.filter(f => f.size <= 8 * 1024 * 1024)
+    const newPhotos = await Promise.all(validFiles.map(uploadPhoto))
+    if (newPhotos.length > 0) {
+      addUploadedPhotos(newPhotos)
+    }
     e.target.value = ''
   }
 
