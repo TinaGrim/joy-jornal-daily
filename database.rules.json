@@ -6,13 +6,13 @@
       "v2": {
         "pages": {
           "$device": {
-            ".validate": "newData.val() === null || $device === '_clock' || (newData.hasChildren(['data', 'updatedAt']) && newData.child('data').isArray() && newData.child('updatedAt').isNumber())"
+            ".validate": "newData.val() === null || (newData.hasChildren(['data', 'updatedAt']) && newData.child('updatedAt').isNumber())"
           }
         }
       },
       "shared": {
         "pages": {
-          ".validate": "newData.val() === null || (newData.hasChildren(['data', 'updatedAt']) && newData.child('data').isArray() && newData.child('updatedAt').isNumber())"
+          ".validate": "newData.val() === null || (newData.hasChildren(['data', 'updatedAt']) && newData.child('updatedAt').isNumber())"
         },
         "metadata": {
           ".validate": "newData.val() === null || (newData.hasChild('data') && newData.child('data').hasChild('anniversaryDate') && newData.child('data').child('anniversaryDate').isString() && newData.child('updatedAt').isNumber())"
@@ -29,7 +29,7 @@
         },
         "history-data": {
           "$id": {
-            ".validate": "newData.val() === null || (newData.hasChild('data') && newData.child('data').isArray())"
+            ".validate": "newData.val() === null || newData.hasChild('data')"
           }
         }
       }
