@@ -320,9 +320,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   // Book starts OPEN by default: landing on a static closed cover made
   // people tap their elements with no response ("cannot select element").
   // The last chosen state is remembered per device.
-  const [bookClosed, setBookClosedState] = useState<boolean>(() => {
+  const initialBookClosed = (() => {
     try { return localStorage.getItem('journal_book_closed') === '1' } catch { return false }
-  })
+  })()
+  const [bookClosed, setBookClosedState] = useState<boolean>(initialBookClosed)
   const setBookClosed = useCallback((closed: boolean) => {
     setBookClosedState(closed)
     try { localStorage.setItem('journal_book_closed', closed ? '1' : '0') } catch { /* storage unavailable */ }
@@ -468,8 +469,11 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     saveMetadataToStorage(sync.metadata)
   }, [sync.metadata])
 
-  const [currentPageIndex, setCurrentPageIndex] = useState(0)
-  const [focusPageIndex, setFocusPageIndexState] = useState(0)
+  // When the book boots already-open, land on the first content spread
+  // (indices 1–2, i.e. "Pg 1–2") exactly like tapping the open button does,
+  // instead of the cover spread ("Pg 0–1").
+  const [currentPageIndex, setCurrentPageIndex] = useState(initialBookClosed ? 0 : 1)
+  const [focusPageIndex, setFocusPageIndexState] = useState(initialBookClosed ? 0 : 1)
   const focusPageIndexRef = useRef(focusPageIndex)
   useEffect(() => { focusPageIndexRef.current = focusPageIndex }, [focusPageIndex])
   const setFocusPageIndex = useCallback((index: number) => {
