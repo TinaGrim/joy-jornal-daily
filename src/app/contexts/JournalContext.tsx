@@ -21,15 +21,24 @@ function sanitizePages(pages: Page[]): Page[] {
 }
 
 function deduplicatePageElements(pages: Page[]): Page[] {
-  const seen = new Set<string>()
-  return pages.map(page => ({
-    ...page,
-    elements: page.elements.filter(el => {
-      if (seen.has(el.id)) return false
-      seen.add(el.id)
-      return true
-    })
-  }))
+  // Dedupe same-id copies WITHIN each page, newest `_updatedAt` winning.
+  // This must never collapse across pages: transferElement moves an element
+  // by tombstoning its source and appending a fresh copy to the target
+  // page — when that id already existed on the target page, keeping the
+  // first occurrence discarded the freshly moved copy, so dragging an
+  // element across pages made it vanish on release.
+  const ts = (el: CanvasElement): number => {
+    const v = el.data?._updatedAt
+    return typeof v === 'number' ? v : 0
+  }
+  return pages.map(page => {
+    const byId = new Map<string, CanvasElement>()
+    for (const el of page.elements ?? []) {
+      const prev = byId.get(el.id)
+      if (!prev || ts(el) > ts(prev)) byId.set(el.id, el)
+    }
+    return { ...page, elements: [...byId.values()] }
+  })
 }
 
 function loadPagesFromStorage(): Page[] | null {
