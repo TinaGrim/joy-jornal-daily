@@ -203,6 +203,16 @@ export class FirebaseSync {
 
   private async flushPages(pages: Page[]) {
     if (!rtdb) return
+    if (!this.pagesReceived) {
+      // Cloud state has not been observed yet this session. Writing now
+      // would overwrite newer remote data with a stale local snapshot
+      // (e.g. a client whose RTDB socket was blocked by browser shields),
+      // silently deleting elements other devices saved meanwhile. Hold the
+      // write until the first cloud snapshot arrives.
+      this.retryPages = pages
+      this.scheduleRetry()
+      return
+    }
     this.lastPagesBroadcast = Date.now()
     this.writingPages = true
     this.persistPending(pages)
@@ -375,7 +385,8 @@ export class FirebaseSync {
         elements: p.elements.filter(el => !el.data?._deleted).map(el => {
           const data = el.data as Record<string, unknown> | undefined
           if (!data) return { ...el, data: {} }
-          const { _updatedAt, ...rest } = data
+          const rest = { ...data }
+          delete rest._updatedAt
           return { ...el, data: Object.keys(rest).length ? rest : data }
         }),
       }))
