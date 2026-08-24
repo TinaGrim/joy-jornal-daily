@@ -91,7 +91,38 @@ export function mergePageSnapshots(slots: PageSnapshot[]): Page[] {
       unique.push(el)
     }
 
-    merged.push({ ...newestPage, elements: unique })
+    // Collapse stacked identical text boxes: repeated tap-to-insert (before
+    // any edit renamed them) produced piles of identical invisible
+    // placeholders on one spot across device slots, which blocked all taps
+    // underneath ("cannot select element"). Identical text + font + size +
+    // color within a few pixels = same insert duplicated; keep the newest.
+    const stackSeen = new Map<string, CanvasElement>()
+    const dedupedStacks: CanvasElement[] = []
+    for (const el of unique) {
+      let stackKey: string | null = null
+      if (el.type === 'text') {
+        const txt = typeof el.data?.text === 'string' ? el.data.text : ''
+        if (txt.trim() !== '') {
+          stackKey = [
+            el.data.text,
+            el.data.font ?? '', el.data.fontSize ?? '', el.data.color ?? '',
+            Math.round((el.x ?? 0) / 4), Math.round((el.y ?? 0) / 4),
+          ].join('|')
+        }
+      }
+      if (stackKey !== null && stackSeen.has(stackKey)) {
+        const existing = stackSeen.get(stackKey)!
+        if (elementTimestamp(el) > elementTimestamp(existing)) {
+          dedupedStacks[dedupedStacks.indexOf(existing)] = el
+          stackSeen.set(stackKey, el)
+        }
+        continue
+      }
+      if (stackKey !== null) stackSeen.set(stackKey, el)
+      dedupedStacks.push(el)
+    }
+
+    merged.push({ ...newestPage, elements: dedupedStacks })
   }
 
   return merged

@@ -24,6 +24,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   const [isMoving, setIsMoving] = useState(false)
   const [dragState, setDragState] = useState<{ x: number; y: number; scale: number } | null>(null)
   const elementRef = useRef<HTMLDivElement>(null)
+  const dragListenersRef = useRef<{ move: (e: PointerEvent) => void; up: (e: PointerEvent) => void } | null>(null)
   const textRef = useRef<HTMLDivElement>(null)
   const menuAbove = element.y < 400
   const moveRef = useRef({
@@ -90,10 +91,33 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     }
     setDragState({ x: rect.left, y: rect.top, scale: rect.width / element.width })
     setIsMoving(true)
+    // Attach drag listeners SYNCHRONOUSLY: registering them in an effect
+    // ([isMoving] dep) left a window where a fast click/tap released before
+    // the pointerup listener existed, leaving isMoving stuck true and the
+    // element permanently invisible/unselectable.
+    attachDragListeners()
   }
 
+  // Drag listeners are attached synchronously by handleMouseDown via
+  // attachDragListeners(); this effect only guarantees cleanup on unmount.
   useEffect(() => {
-    if (!isMoving) return
+    return () => {
+      const l = dragListenersRef.current
+      if (l) {
+        document.removeEventListener('pointermove', l.move)
+        document.removeEventListener('pointerup', l.up)
+        document.removeEventListener('pointercancel', l.up)
+        dragListenersRef.current = null
+      }
+      if (moveRef.current.rafId !== null) {
+        cancelAnimationFrame(moveRef.current.rafId)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount-only cleanup
+  }, [])
+
+  function attachDragListeners() {
+    if (dragListenersRef.current) return
 
     const handlePointerMove = (e: PointerEvent) => {
       if (moveRef.current.rafId !== null) return
@@ -125,6 +149,13 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     }
 
     const handlePointerUp = (e: PointerEvent) => {
+      const l = dragListenersRef.current
+      if (l) {
+        document.removeEventListener('pointermove', l.move)
+        document.removeEventListener('pointerup', l.up)
+        document.removeEventListener('pointercancel', l.up)
+        dragListenersRef.current = null
+      }
       if (moveRef.current.rafId !== null) {
         cancelAnimationFrame(moveRef.current.rafId)
         moveRef.current.rafId = null
@@ -175,21 +206,12 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       flushSync()
     }
 
+    const listeners = { move: handlePointerMove, up: handlePointerUp }
+    dragListenersRef.current = listeners
     document.addEventListener('pointermove', handlePointerMove)
     document.addEventListener('pointerup', handlePointerUp)
     document.addEventListener('pointercancel', handlePointerUp)
-
-    return () => {
-      document.removeEventListener('pointermove', handlePointerMove)
-      document.removeEventListener('pointerup', handlePointerUp)
-      document.removeEventListener('pointercancel', handlePointerUp)
-      if (moveRef.current.rafId !== null) {
-        cancelAnimationFrame(moveRef.current.rafId)
-      }
-      setDragState(null)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- drag data captured in moveRef at mousedown; context identities (flushSync etc.) must not tear down listeners mid-drag
-  }, [isMoving])
+  }
 
   useEffect(() => {
     if (isEditing && textRef.current) {

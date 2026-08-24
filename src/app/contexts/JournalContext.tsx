@@ -317,7 +317,16 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     [saveUserCursor, currentUser.name, currentUser.color, effectiveUser?.uid],
   )
 
-  const [bookClosed, setBookClosed] = useState(true)
+  // Book starts OPEN by default: landing on a static closed cover made
+  // people tap their elements with no response ("cannot select element").
+  // The last chosen state is remembered per device.
+  const [bookClosed, setBookClosedState] = useState<boolean>(() => {
+    try { return localStorage.getItem('journal_book_closed') === '1' } catch { return false }
+  })
+  const setBookClosed = useCallback((closed: boolean) => {
+    setBookClosedState(closed)
+    try { localStorage.setItem('journal_book_closed', closed ? '1' : '0') } catch { /* storage unavailable */ }
+  }, [])
 
   const [pages, setPages] = useState<Page[]>(() => {
     const stored = loadPagesFromStorage()
@@ -526,9 +535,23 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       zIndex: journalNow(),
     }
     const idx = pageIdx ?? focusPageIndexRef.current
+    // Cascade the spawn point when something already sits exactly there, so
+    // repeated tap-to-insert never stacks invisible boxes on one spot (the
+    // "cannot select element" regression).
+    const occupied = (el: { x: number; y: number }) =>
+      Math.abs(el.x - newElement.x) < 8 && Math.abs(el.y - newElement.y) < 8
     savePages(prev => {
+      const page = prev[idx]
+      let { x, y } = newElement
+      for (let attempt = 0; attempt < 24; attempt++) {
+        if (!page.elements.some(occupied)) break
+        x += 16
+        if (x + newElement.width > 640) { x = Math.max(0, 640 - newElement.width); y = Math.min(860 - newElement.height, y + 24) }
+        newElement.x = x
+        newElement.y = y
+      }
       const updated = [...prev]
-      updated[idx] = { ...updated[idx], elements: [...updated[idx].elements, newElement] }
+      updated[idx] = { ...page, elements: [...page.elements, newElement] }
       return updated
     })
     sync.broadcastOperation({ type: 'element-add', pageIndex: idx, element: newElement })

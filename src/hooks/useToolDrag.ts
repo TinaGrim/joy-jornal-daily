@@ -26,9 +26,9 @@ export function useToolDrag({ elementType, data, width = 80, height = 80 }: UseT
     }),
   }), [dragItem])
 
-  // Tap-to-insert fallback: places the tool at the center of the focus page.
-  // Works on every device regardless of drag-and-drop support (touch, Safari,
-  // assistive tech) — dragging stays available where it works.
+  // Tap-to-insert fallback: places the tool near the center of the focus
+  // page, cascading a few pixels per insert so repeated taps never stack
+  // invisible identical boxes on the exact same spot.
   const insert = useCallback(() => {
     addElement({
       type: elementType as CanvasElement['type'],
