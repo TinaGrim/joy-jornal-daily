@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { motion } from 'motion/react'
 import { useJournal } from '../contexts/JournalContext'
-import { useTheme } from '../contexts/ThemeContext'
 import Canvas from './Canvas'
 import { VintageVignette, VintageCorners, CoverOrnament, ForeEdgePage, BottomPageEdge, RibbonBookmark } from './VintageEffects'
 import { ChevronLeft, ChevronRight, Plus, Check, Maximize2, Minimize2 } from 'lucide-react'
@@ -38,11 +37,8 @@ function useScaleToFit(singlePage: boolean, sidebarOpen: boolean, rightPanelOpen
   return scale
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: boolean }) {
   const { pages, bookClosed, setBookClosed, currentPageIndex, setCurrentPageIndex, setFocusPageIndex, addPage, rightPanelWidth } = useJournal()
-  const { theme } = useTheme()
-  const isDark = theme === 'night'
   const { status } = useAutoSave(pages)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -172,7 +168,7 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
             <div
               data-book
               className="flex shadow-2xl rounded-2xl overflow-visible book-shadow relative"
-              style={{ transform: 'rotateY(-1.5deg)', transformStyle: 'preserve-3d' }}
+              style={{ transform: 'rotateY(-1.5deg)' }}
             >
               <div
                 className="relative rounded-2xl flex flex-col"
@@ -226,7 +222,7 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
             <div
               data-book
               className="flex justify-end shadow-2xl rounded-2xl overflow-visible book-shadow"
-              style={{ transform: 'rotateY(-1.5deg)', transformStyle: 'preserve-3d' }}
+              style={{ transform: 'rotateY(-1.5deg)' }}
             >
               <div
                 className="relative overflow-clip rounded-2xl"
@@ -257,7 +253,11 @@ export default function BookInterface({ sidebarOpen = false }: { sidebarOpen?: b
             <div
               data-book
               className="flex shadow-2xl rounded-2xl overflow-visible book-shadow"
-              style={{ transform: 'rotateY(-1.5deg)', transformStyle: 'preserve-3d' }}
+              // No transform-style:preserve-3d here. Chromium hit-tests through
+              // the 3D planes, so with perspective+tilt the right page sits
+              // "behind" the click point and its elements become unselectable
+              // (Firefox is unaffected). Flat rendering is pixel-identical.
+              style={{ transform: 'rotateY(-1.5deg)' }}
             >
               <div
                 className="relative overflow-visible rounded-s-2xl"
