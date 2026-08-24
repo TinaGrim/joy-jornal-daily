@@ -194,6 +194,10 @@ interface JournalContextType {
   syncLoading: boolean
   isConnected: boolean
   flushSync: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: boolean
+  canRedo: boolean
   saveCheckpoint: (label?: string) => Promise<void>
   loadCheckpoint: (id: string) => Promise<Page[] | null>
   deleteCheckpoint: (id: string) => Promise<void>
@@ -509,8 +513,76 @@ export function JournalProvider({ children }: { children: ReactNode }) {
 
   const storageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // --- Undo / redo -------------------------------------------------------
+  // Snapshot-based: every committed change pushes the previous book onto the
+  // stack. Restores are merge-aware: elements are re-stamped with fresh
+  // timestamps so the restored state wins the newest-timestamp merge on
+  // every device, and elements created after the snapshot are tombstoned so
+  // they cannot resurrect through the union merge.
+  const UNDO_MAX = 60
+  const UNDO_COALESCE_MS = 450
+  const undoStackRef = useRef<Page[][]>([])
+  const redoStackRef = useRef<Page[][]>([])
+  const lastUndoPushRef = useRef(0)
+  const [undoDepth, setUndoDepth] = useState(0)
+  const [redoDepth, setRedoDepth] = useState(0)
+
+  const pushUndoSnapshot = useCallback((force: boolean) => {
+    const now = Date.now()
+    if (!force && now - lastUndoPushRef.current < UNDO_COALESCE_MS) return
+    lastUndoPushRef.current = now
+    undoStackRef.current.push(JSON.parse(JSON.stringify(pagesRef.current)) as Page[])
+    if (undoStackRef.current.length > UNDO_MAX) undoStackRef.current.shift()
+    redoStackRef.current = []
+    setRedoDepth(0)
+    setUndoDepth(undoStackRef.current.length)
+  }, [])
+
+  const publishRestored = useCallback((snapshot: Page[]) => {
+    const now = journalNow()
+    const snapIds = new Set<string>()
+    for (const p of snapshot) for (const el of p.elements ?? []) snapIds.add(el.id)
+    const revived = snapshot.map(p => ({
+      ...p,
+      elements: (p.elements ?? []).map(el => ({ ...el, data: { ...el.data, _deleted: false, _updatedAt: now } })),
+    }))
+    const withExtras = revived.map((p, i) => {
+      const extras = (pagesRef.current[i]?.elements ?? [])
+        .filter(el => !snapIds.has(el.id) && !el.data?._deleted)
+        .map(el => ({ ...el, data: { ...el.data, _deleted: true, _updatedAt: now } }))
+      return { ...p, elements: [...p.elements, ...extras] }
+    })
+    const next = sanitizePages(withExtras)
+    setPages(next)
+    savePagesToStorage(next)
+    sync.savePages(deduplicatePageElements(next))
+    setSelectedElementId(null)
+    setSelectedElementIds([])
+  }, [sync])
+
+  const undo = useCallback(() => {
+    const snapshot = undoStackRef.current.pop()
+    if (!snapshot) return
+    redoStackRef.current.push(JSON.parse(JSON.stringify(pagesRef.current)) as Page[])
+    setUndoDepth(undoStackRef.current.length)
+    setRedoDepth(redoStackRef.current.length)
+    lastUndoPushRef.current = 0
+    publishRestored(snapshot)
+  }, [publishRestored])
+
+  const redo = useCallback(() => {
+    const snapshot = redoStackRef.current.pop()
+    if (!snapshot) return
+    undoStackRef.current.push(JSON.parse(JSON.stringify(pagesRef.current)) as Page[])
+    setUndoDepth(undoStackRef.current.length)
+    setRedoDepth(redoStackRef.current.length)
+    lastUndoPushRef.current = 0
+    publishRestored(snapshot)
+  }, [publishRestored])
+
   const savePages = useCallback(
-    (updater: (prev: Page[]) => Page[], syncEnabled = true) => {
+    (updater: (prev: Page[]) => Page[], syncEnabled = true, undoForce = false) => {
+      if (syncEnabled || undoForce) pushUndoSnapshot(undoForce)
       const next = sanitizePages(updater(pagesRef.current))
       setPages(next)
       if (storageTimerRef.current) clearTimeout(storageTimerRef.current)
@@ -522,7 +594,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         sync.savePages(next)
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sync.savePages])
+    }, [sync.savePages, pushUndoSnapshot])
 
   useEffect(() => {
     const persistNow = () => {
@@ -566,7 +638,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...page, elements: [...page.elements, newElement] }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'element-add', pageIndex: idx, element: newElement })
     return newElement.id
   }, [savePages, sync.broadcastOperation])
@@ -599,7 +671,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         ),
       }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'element-delete', pageIndex: idx, elementId: id })
   }, [savePages, sync.broadcastOperation])
 
@@ -615,7 +687,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         ),
       }
       return updated
-    })
+    }, true, true)
     ids.forEach(id => sync.broadcastOperation({ type: 'element-delete', pageIndex: idx, elementId: id }))
   }, [savePages, sync.broadcastOperation])
 
@@ -669,7 +741,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...updated[idx], background }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'page-update', pageIndex: idx, patch: { background } })
   }, [savePages, sync.broadcastOperation])
 
@@ -679,7 +751,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...updated[idx], pattern }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'page-update', pageIndex: idx, patch: { pattern } })
   }, [savePages, sync.broadcastOperation])
 
@@ -689,20 +761,20 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...updated[idx], gridSize: size }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'page-update', pageIndex: idx, patch: { gridSize: size } })
   }, [savePages, sync.broadcastOperation])
 
   const updateAllPagesBackground = useCallback((background: string) => {
-    savePages(prev => prev.map(p => ({ ...p, background })), true)
+    savePages(prev => prev.map(p => ({ ...p, background })), true, true)
   }, [savePages])
 
   const updateAllPagesPattern = useCallback((pattern: PagePattern) => {
-    savePages(prev => prev.map(p => ({ ...p, pattern })), true)
+    savePages(prev => prev.map(p => ({ ...p, pattern })), true, true)
   }, [savePages])
 
   const updateAllPagesGridSize = useCallback((size: number) => {
-    savePages(prev => prev.map(p => ({ ...p, gridSize: size })), true)
+    savePages(prev => prev.map(p => ({ ...p, gridSize: size })), true, true)
   }, [savePages])
 
   const transferElement = useCallback((elementId: string, fromPage: number, toPage: number, newX: number, newY: number) => {
@@ -722,7 +794,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         elements: [...updated[toPage].elements, { ...element, x: newX, y: newY, data: { ...element.data, _deleted: false, _updatedAt: now + 1 } }],
       }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'element-move', elementId, fromPage, toPage, x: newX, y: newY })
   }, [savePages, sync.broadcastOperation])
 
@@ -732,7 +804,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...updated[idx], elements: newElements }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'page-elements-replace', pageIndex: idx, elements: newElements })
   }, [savePages, sync.broadcastOperation])
 
@@ -748,7 +820,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         })),
       }
       return updated
-    })
+    }, true, true)
     sync.broadcastOperation({ type: 'page-clear', pageIndex: idx })
   }, [savePages, sync.broadcastOperation])
 
@@ -874,6 +946,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         syncLoading, isConnected: sync.isConnected,
         syncLatency, syncPeakLatency,
         flushSync: () => { sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current))); sync.flushPages() },
+        undo, redo,
+        canUndo: undoDepth > 0,
+        canRedo: redoDepth > 0,
         saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints,
         exportBackup,
       }}

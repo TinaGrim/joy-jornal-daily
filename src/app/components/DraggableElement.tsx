@@ -26,7 +26,15 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   const elementRef = useRef<HTMLDivElement>(null)
   const dragListenersRef = useRef<{ move: (e: PointerEvent) => void; up: (e: PointerEvent) => void } | null>(null)
   const textRef = useRef<HTMLDivElement>(null)
-  const menuAbove = element.y < 400
+  // Toolbar placement: show above by default, but flip below when there is
+  // no room above the element (previously anything near the page top had
+  // its menu clipped). Also clamp horizontally so the row stays on the page.
+  const TOOLBAR_GAP = 48
+  const TOOLBAR_W = 150
+  const fitsAbove = element.y >= TOOLBAR_GAP
+  const fitsBelow = element.y + element.height + TOOLBAR_GAP <= 860
+  const menuAbove = fitsAbove || !fitsBelow
+  const toolLeft = Math.max(-element.x, Math.min(0, 640 - TOOLBAR_W - element.x))
   const moveRef = useRef({
     startMouseX: 0,
     startMouseY: 0,
@@ -755,7 +763,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
               }}
             />
           ))}
-          <div className={`absolute ${menuAbove ? '-top-10' : 'bottom-full mb-2'} left-0 flex items-center gap-0.5 bg-white rounded-lg shadow-lg p-1 z-10`}>
+          <div className={`absolute ${menuAbove ? '-top-10' : 'bottom-full mb-2'} flex items-center gap-0.5 bg-white rounded-lg shadow-lg p-1 z-10`} style={{ left: toolLeft }}>
             <button
               onPointerDown={handleToolMouseDown}
               onClick={e => { e.stopPropagation(); bringForward(element.id, pageIndex) }}

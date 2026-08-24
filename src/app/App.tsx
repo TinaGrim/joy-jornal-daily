@@ -41,12 +41,52 @@ function JournalApp() {
   const { theme } = useTheme()
   const isNight = theme === 'night'
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { selectedElementId, setSelectedElementId, deleteElement, updateElement, pages, focusPageIndex, cloudLoading } = useJournal()
+  const { selectedElementId, setSelectedElementId, setSelectedElementIds, deleteElement, updateElement, addElement, pages, focusPageIndex, cloudLoading, undo, redo } = useJournal()
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      const mod = e.ctrlKey || e.metaKey
+
+      // Undo / redo — skipped while typing so contentEditable keeps its
+      // native text undo.
+      if (mod && !isInput) {
+        const k = e.key.toLowerCase()
+        if (k === 'z' && !e.shiftKey) {
+          e.preventDefault()
+          undo()
+          return
+        }
+        if ((k === 'z' && e.shiftKey) || k === 'y') {
+          e.preventDefault()
+          redo()
+          return
+        }
+        if (k === 'd') {
+          e.preventDefault()
+          const page = pages[focusPageIndex]
+          const el = page?.elements?.find(x => x.id === selectedElementId && !x.data?._deleted)
+          if (!el) return
+          const newId = addElement({
+            type: el.type,
+            x: Math.max(0, Math.min(640 - el.width, el.x + 16)),
+            y: Math.max(0, Math.min(860 - el.height, el.y + 16)),
+            width: el.width,
+            height: el.height,
+            rotation: el.rotation,
+            data: JSON.parse(JSON.stringify(el.data)),
+          }, focusPageIndex)
+          setSelectedElementId(newId)
+          return
+        }
+      }
+
+      if (e.key === 'Escape' && !isInput) {
+        setSelectedElementId(null)
+        setSelectedElementIds([])
+        return
+      }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (!selectedElementId || isInput) return
@@ -76,7 +116,7 @@ function JournalApp() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedElementId, deleteElement, setSelectedElementId, updateElement, pages, focusPageIndex])
+  }, [selectedElementId, deleteElement, setSelectedElementId, setSelectedElementIds, updateElement, addElement, pages, focusPageIndex, undo, redo])
 
   return (
     <motion.div
