@@ -1,5 +1,22 @@
 {
   "projects": {
     "default": "jornal-52741"
+  },
+  "targets": {
+    "jornal-52741": {
+      "hosting": {
+        "jornal": [
+          "jornal-52741"
+        ],
+        "joy": [
+          "joy-journey-daily"
+        ]
+      }
+    }
+  },
+  "etags": {},
+  "hosting": {
+    "jornal": "jornal-52741",
+    "joy": "joy-journey-daily"
   }
 }
