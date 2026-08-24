@@ -8,6 +8,16 @@
           "$device": {
             ".validate": "newData.val() === null || (newData.hasChildren(['data', 'updatedAt']) && newData.child('updatedAt').isNumber())"
           }
+        },
+        "photos": {
+          "$id": {
+            ".validate": "newData.val() === null || newData.isString()"
+          }
+        },
+        "clock": {
+          "$id": {
+            ".validate": "newData.val() === null || newData.isNumber()"
+          }
         }
       },
       "shared": {

@@ -162,15 +162,30 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     }
   }, [])
 
-  const applyIncomingOp = useCallback((operation: SyncOperation) => {
-    if (operation._uid && seenOpUids.current.has(operation._uid)) return
-    if (operation._uid) seenOpUids.current.add(operation._uid)
+  const opQueueRef = useRef<SyncOperation[]>([])
+  const opRafRef = useRef<number | null>(null)
+
+  const flushOpQueue = useCallback(() => {
+    opRafRef.current = null
+    if (opQueueRef.current.length === 0) return
+    const batch = opQueueRef.current
+    opQueueRef.current = []
     setPages(prev => {
-      const next = applyOperation(prev, operation)
+      let next = prev
+      for (const op of batch) next = applyOperation(next, op)
       pagesRef.current = next
       return next
     })
   }, [])
+
+  const applyIncomingOp = useCallback((operation: SyncOperation) => {
+    if (operation._uid && seenOpUids.current.has(operation._uid)) return
+    if (operation._uid) seenOpUids.current.add(operation._uid)
+    opQueueRef.current.push(operation)
+    if (opRafRef.current === null) {
+      opRafRef.current = requestAnimationFrame(flushOpQueue)
+    }
+  }, [flushOpQueue])
 
   const onIncomingBCOp = useCallback((operation: SyncOperation) => {
     if (operation._createdAt && !(operation._uid && seenOpUids.current.has(operation._uid))) {
@@ -278,6 +293,13 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     }, CURSOR_CLEAN_INTERVAL)
 
     return () => {
+      if (opRafRef.current !== null) {
+        cancelAnimationFrame(opRafRef.current)
+        opRafRef.current = null
+      }
+      if (opQueueRef.current.length > 0) {
+        flushOpQueue()
+      }
       bs.destroy()
       if (fbSync) fbSync.destroy()
       syncRef.current = null
@@ -285,7 +307,7 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
       clearInterval(cleanup)
       clearTimeout(fallbackTimer)
     }
-  }, [enabled, onSyncError, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata, onIncomingFBPages])
+  }, [enabled, onSyncError, publishCursors, onIncomingPages, onIncomingBCOp, onIncomingFBOp, onIncomingMetadata, onIncomingFBPages, flushOpQueue])
 
   const savePages = useCallback((newPages: Page[]) => {
     setPages(newPages)

@@ -105,7 +105,7 @@ export default function RightToolbar() {
       <motion.div
         animate={{ x: open ? 0 : PANEL_WIDTH + 8 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className={`relative h-full shadow-lg flex ${open ? 'pointer-events-auto' : ''}`}
+        className={`relative h-full shadow-lg flex z-30 ${open ? 'pointer-events-auto' : ''}`}
         style={{
           width: PANEL_WIDTH + 8,
         }}

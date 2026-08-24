@@ -229,6 +229,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
   }, [fbSignIn])
 
+  // Guest session uses a local uid. Note: switching this to Firebase
+  // anonymous auth (signInAnonymously) currently hard-freezes headless
+  // Chromium renderers during the SDK's persistence init, and the Anonymous
+  // provider is disabled server-side anyway (ADMIN_ONLY_OPERATION). Revisit
+  // only together with enabling the provider in Firebase Console AND testing
+  // on real devices.
   const signInAnonymously = useCallback(() => {
     let uid = localStorage.getItem(STORAGE_KEY_UID)
     if (!uid) {

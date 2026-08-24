@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { DndProvider } from 'react-dnd'
+import { MultiBackend, HTML5DragTransition, TouchTransition } from 'dnd-multi-backend'
 import { HTML5Backend } from 'react-dnd-html5-backend'
+import { TouchBackend } from 'react-dnd-touch-backend'
 import { Toaster } from 'sonner'
 import { JournalProvider, useJournal } from './contexts/JournalContext'
 import { ThemeProvider, useTheme } from './contexts/ThemeContext'
@@ -190,9 +192,16 @@ function AuthGate() {
   return <JournalApp />
 }
 
+const dndOptions = {
+  backends: [
+    { id: 'html5', backend: HTML5Backend, transition: HTML5DragTransition },
+    { id: 'touch', backend: TouchBackend, options: { enableMouseEvents: false, delayTouchStart: 150 }, transition: TouchTransition },
+  ],
+}
+
 export default function App() {
   return (
-    <DndProvider backend={HTML5Backend}>
+    <DndProvider backend={MultiBackend} options={dndOptions}>
       <ThemeProvider>
         <JournalProvider>
           <Toaster position="top-right" />

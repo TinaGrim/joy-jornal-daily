@@ -155,7 +155,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     drop(node as never)
   }, [drop])
 
-  const getCanvasPos = useCallback((e: React.MouseEvent) => {
+  const getCanvasPos = useCallback((e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect()
     return {
       x: (e.clientX - rect.left) / rect.width * 640,
@@ -163,9 +163,14 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     }
   }, [isActive])
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0 || !isActive) return
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary || !isActive) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     setFocusPageIndex(pageIndex)
+    // Capture the pointer while drawing so strokes continue outside the canvas
+    if (drawSettings.active) {
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* optional */ }
+    }
     if (drawSettings.active && drawSettings.brush === 'lasso') {
     } else if (!drawSettings.active) {
       setSelectedElementId(null)
@@ -176,8 +181,8 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
     drawingPathRef.current = `M ${pos.x} ${pos.y}`
   }, [isActive, drawSettings.active, getCanvasPos, setSelectedElementId, setSelectedElementIds, setFocusPageIndex, pageIndex])
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDrawingRef.current || !isActive || !drawSettings.active) return
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawingRef.current || !isActive || !drawSettings.active || !e.isPrimary) return
     const pos = getCanvasPos(e)
     const prev = drawingPathRef.current
     drawingPathRef.current = prev ? `${prev} L ${pos.x} ${pos.y}` : `M ${pos.x} ${pos.y}`
@@ -292,10 +297,10 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
       data-page-index={pageIndex}
       className={`w-full h-full relative z-10 overflow-visible select-none touch-none ${side === 'left' ? 'rounded-s-2xl' : side === 'right' ? 'rounded-e-2xl' : ''}`}
       style={{ background: page.background, touchAction: 'none' as const }}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handleMouseUp}
+      onPointerCancel={handleMouseUp}
       onDoubleClick={handleDoubleClick}
     >
       {/* Paper grain texture — bottom layer */}
@@ -304,7 +309,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
       {/* Pattern overlay — on top of background + paper grain */}
       {page.pattern === 'grid' && (
         <div
-          className="absolute inset-0 opacity-[0.12] pointer-events-none z-10"
+          className="absolute inset-0 opacity-[0.12] pointer-events-none z-0"
           style={{
             backgroundImage:
               'linear-gradient(#8b7355 1px, transparent 1px), linear-gradient(90deg, #8b7355 1px, transparent 1px)',
@@ -314,7 +319,7 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
       )}
       {page.pattern === 'dots' && (
         <div
-          className="absolute inset-0 opacity-[0.18] pointer-events-none z-10"
+          className="absolute inset-0 opacity-[0.18] pointer-events-none z-0"
           style={{
             backgroundImage:
               `radial-gradient(circle, #8b7355 2px, transparent 2px)`,

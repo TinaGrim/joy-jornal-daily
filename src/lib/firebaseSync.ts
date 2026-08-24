@@ -184,7 +184,8 @@ export class FirebaseSync {
   async broadcastPages(pages: Page[]) {
     if (!rtdb) return
     const now = Date.now()
-    if (now - this.lastPagesBroadcast < 1000) {
+    const WINDOW_MS = 150
+    if (now - this.lastPagesBroadcast < WINDOW_MS) {
       this.pendingPages = pages
       if (!this.broadcastThrottleTimer) {
         this.broadcastThrottleTimer = setTimeout(() => {
@@ -193,7 +194,7 @@ export class FirebaseSync {
             this.flushPages(this.pendingPages)
             this.pendingPages = null
           }
-        }, 1000 - (now - this.lastPagesBroadcast))
+        }, WINDOW_MS - (now - this.lastPagesBroadcast))
       }
       return
     }
@@ -239,7 +240,7 @@ export class FirebaseSync {
       this.retryPages = pages
       this.notifyError('Sync failed — will retry automatically')
       this.scheduleRetry()
-      this.retryBackoffMs = Math.min(this.retryBackoffMs * 2, 30000)
+      this.retryBackoffMs = Math.min(this.retryBackoffMs * 2, 5000)
     } finally {
       this.writingPages = false
     }

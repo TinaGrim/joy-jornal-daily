@@ -19,7 +19,7 @@ export default function EnvelopePanel() {
 
   const data = useMemo(() => ({ opened: false, note: '', color: envelopeColor }), [envelopeColor])
 
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'envelope',
     data,
     width: 160,
@@ -97,6 +97,7 @@ export default function EnvelopePanel() {
 
         <div
           ref={drag}
+          onClick={insert}
           className={cn(
             'py-4 px-4 rounded-xl border-2 border-dashed text-center cursor-grab active:cursor-grabbing transition-all group',
             isDark
@@ -106,7 +107,7 @@ export default function EnvelopePanel() {
           )}
         >
           <Mail className="w-6 h-6 mx-auto mb-1.5 text-warm-brown group-hover:text-terracotta transition-colors" />
-          <p className="font-handwriting text-warm-brown group-hover:text-terracotta transition-colors">Drag to page</p>
+          <p className="font-handwriting text-warm-brown group-hover:text-terracotta transition-colors">Drag or tap to add</p>
           <p className={`text-[12px] font-handwriting mt-0.5 ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>Click envelope to open</p>
         </div>
       </div>

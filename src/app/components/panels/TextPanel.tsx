@@ -28,7 +28,7 @@ export default function TextPanel() {
     color: selectedColor,
   }), [textInput, selectedFont, fontSize, selectedColor])
 
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'text',
     data,
     width: 200,
@@ -112,7 +112,7 @@ export default function TextPanel() {
         <div className="flex items-center gap-2">
           <p className={`text-sm font-handwriting ${isDark ? 'text-[#a6adc8]' : 'text-warm-brown'}`}>Your Text</p>
           <ArrowRight className={`w-3.5 h-3.5 ${isDark ? 'text-[#6c7086]' : 'text-warm-brown/40'}`} />
-          <span className={`text-[12px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>Drag to page</span>
+          <span className={`text-[12px] font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>Drag or tap to add</span>
         </div>
         <textarea
           value={textInput}
@@ -123,6 +123,7 @@ export default function TextPanel() {
         />
         <div
           ref={drag}
+          onClick={insert}
           className={cn(
             'w-full py-3 px-4 rounded-xl border-2 border-dashed flex items-center justify-center gap-2 cursor-grab active:cursor-grabbing transition-all group',
             isDark

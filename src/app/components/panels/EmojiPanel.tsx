@@ -21,7 +21,7 @@ function normalizeEmoji(e: string) {
 function EmojiItem({ emoji, isDark }: { emoji: string; isDark: boolean }) {
   const normalizedEmoji = useMemo(() => normalizeEmoji(emoji), [emoji])
   const data = useMemo(() => ({ emoji: normalizedEmoji }), [normalizedEmoji])
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'emoji',
     data,
     width: 80,
@@ -31,6 +31,7 @@ function EmojiItem({ emoji, isDark }: { emoji: string; isDark: boolean }) {
   return (
     <button
       ref={drag}
+      onClick={insert}
       className={cn(
         'w-full aspect-square flex items-center justify-center text-2xl rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-md hover:scale-105 hover:-translate-y-0.5',
         isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white',

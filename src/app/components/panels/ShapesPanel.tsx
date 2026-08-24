@@ -38,7 +38,7 @@ function ShapePreview({ id, clipPath, round, fill }: { id: ShapeType; clipPath?:
 
 function DraggableShape({ shape, fill, isDark }: { shape: ShapeType; fill: string; isDark: boolean }) {
   const data = useMemo(() => ({ shape, fill, opacity: 0.85 }), [shape, fill])
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'shape',
     data,
     width: 120,
@@ -50,6 +50,7 @@ function DraggableShape({ shape, fill, isDark }: { shape: ShapeType; fill: strin
   return (
     <div
       ref={drag}
+      onClick={insert}
       className={cn(
         'flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-lg hover:-translate-y-1',
         isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white',
@@ -66,7 +67,7 @@ function DraggableShape({ shape, fill, isDark }: { shape: ShapeType; fill: strin
 
 function DraggableIcon({ icon: Icon, label, isDark }: { icon: typeof Plane; label: string; name: string; isDark: boolean }) {
   const data = useMemo(() => ({ shape: 'icon', icon: label, fill: '#2c3e50', opacity: 1 }), [label])
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'shape',
     data,
     width: 80,
@@ -76,6 +77,7 @@ function DraggableIcon({ icon: Icon, label, isDark }: { icon: typeof Plane; labe
   return (
     <button
       ref={drag}
+      onClick={insert}
       className={cn(
         'flex flex-col items-center gap-1 p-3 rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-lg hover:-translate-y-1',
         isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white',

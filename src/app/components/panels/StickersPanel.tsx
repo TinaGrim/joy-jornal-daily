@@ -70,7 +70,7 @@ const categories: Category[] = [
 
 function DraggableSticker({ emoji, label, isDark }: { emoji: string; label: string; isDark: boolean }) {
   const data = useMemo(() => ({ src: emoji, label, category: '' }), [emoji, label])
-  const { isDragging, drag } = useToolDrag({
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'sticker',
     data,
     width: 100,
@@ -80,6 +80,7 @@ function DraggableSticker({ emoji, label, isDark }: { emoji: string; label: stri
   return (
     <button
       ref={drag}
+      onClick={insert}
       className={cn(
         'flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 cursor-grab active:cursor-grabbing transition-all hover:border-terracotta hover:shadow-md hover:-translate-y-0.5',
         isDark ? 'border-[#45475a] bg-[#313244]' : 'border-border-light bg-white',

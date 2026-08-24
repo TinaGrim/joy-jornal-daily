@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import type { CanvasElement } from '@/types/journal'
 import { useJournal } from '../contexts/JournalContext'
+import { usePhotoSrc } from '@/lib/photoBank'
 import { cn } from '@/lib/utils'
 import { Trash2, MoveUp, MoveDown, Plane, Compass, Camera, Luggage, X, Mail, Heart, MoreVertical, Copy } from 'lucide-react'
 
@@ -42,13 +43,16 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   const isSelected = selectedElementId === element.id
   const isMultiSelected = selectedElementIds.length > 0 && selectedElementIds.includes(element.id)
   const [menuOpen, setMenuOpen] = useState(false)
+  const photoSrc = usePhotoSrc(element.data.src)
 
   const FONTS = ['Caveat', 'Playfair Display', 'Source Serif 4', 'Dancing Script', 'Inter', 'monospace']
 
   const elementTransform = `rotate(${element.rotation}deg)`
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.PointerEvent) => {
     if (isEditing || isResizing || drawSettings.active) return
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     e.stopPropagation()
     setFocusPageIndex(pageIndex)
     setSelectedElementId(element.id)
@@ -91,7 +95,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   useEffect(() => {
     if (!isMoving) return
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (moveRef.current.rafId !== null) return
       moveRef.current.rafId = requestAnimationFrame(() => {
         moveRef.current.rafId = null
@@ -120,7 +124,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       })
     }
 
-    const handleMouseUp = (e: MouseEvent) => {
+    const handlePointerUp = (e: PointerEvent) => {
       if (moveRef.current.rafId !== null) {
         cancelAnimationFrame(moveRef.current.rafId)
         moveRef.current.rafId = null
@@ -171,12 +175,14 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       flushSync()
     }
 
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+    document.addEventListener('pointermove', handlePointerMove)
+    document.addEventListener('pointerup', handlePointerUp)
+    document.addEventListener('pointercancel', handlePointerUp)
 
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('pointermove', handlePointerMove)
+      document.removeEventListener('pointerup', handlePointerUp)
+      document.removeEventListener('pointercancel', handlePointerUp)
       if (moveRef.current.rafId !== null) {
         cancelAnimationFrame(moveRef.current.rafId)
       }
@@ -204,8 +210,11 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     elementRef.current = node
   }, [])
 
-  const handleResize = (e: React.MouseEvent, corner: string) => {
+  const handleResize = (e: React.PointerEvent, corner: string) => {
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     e.stopPropagation()
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* optional */ }
     setIsResizing(true)
     const startX = e.clientX
     const startY = e.clientY
@@ -217,7 +226,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       ? elementRef.current.getBoundingClientRect().width / element.width
       : 1
 
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const onPointerMove = (moveEvent: PointerEvent) => {
       const dx = (moveEvent.clientX - startX) / s
       const dy = (moveEvent.clientY - startY) / s
       let newWidth = startWidth
@@ -233,15 +242,17 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       updateElement(element.id, { width: newWidth, height: newHeight, x: newX, y: newY }, false, pageIndex)
     }
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
       setIsResizing(false)
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointercancel', onPointerUp)
       flushSync()
     }
 
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointercancel', onPointerUp)
   }
 
   const renderElement = () => {
@@ -285,7 +296,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                 <circle cx="98" cy="55" r="8" fill="white" />
                 <circle cx="97" cy="70" r="7" fill="white" />
 
-                <image href={element.data.src as string} x="4" y="8" width="92" height="84" preserveAspectRatio="xMidYMid slice" clipPath={`url(#w-${cid})`} />
+                <image href={photoSrc ?? (element.data.src as string)} x="4" y="8" width="92" height="84" preserveAspectRatio="xMidYMid slice" clipPath={`url(#w-${cid})`} />
 
                 <rect x="4" y="8" width="92" height="84" rx="3" fill="none" stroke="#A8C8E0" strokeWidth="1" />
 
@@ -316,7 +327,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           return (
             <div className="w-full h-full bg-white p-2 shadow-lg rounded-sm">
               <img
-                src={element.data.src as string}
+                src={photoSrc ?? (element.data.src as string)}
                 alt=""
                 draggable={false}
                 className="w-full h-full object-cover rounded-sm"
@@ -328,7 +339,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           return (
             <div className="w-full h-full relative" style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.15))' }}>
               <img
-                src={element.data.src as string}
+                src={photoSrc ?? (element.data.src as string)}
                 alt=""
                 draggable={false}
                 className="w-full h-full object-cover"
@@ -339,7 +350,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
         }
         return (
           <img
-            src={element.data.src as string}
+            src={photoSrc ?? (element.data.src as string)}
             alt=""
             draggable={false}
             className="w-full h-full object-cover"
@@ -360,6 +371,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
               suppressContentEditableWarning
               spellCheck={false}
               data-placeholder="Type here..."
+              onPointerDown={e => e.stopPropagation()}
               onMouseDown={e => e.stopPropagation()}
               onKeyDown={e => {
                 if (e.key === 'Escape') {
@@ -399,6 +411,12 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
         return (
           <div
             onDoubleClick={e => { e.stopPropagation(); setIsEditing(true) }}
+            onClick={e => {
+              e.stopPropagation()
+              // Tap-to-edit: a tap on an already-selected text opens the editor
+              // (double-click stays for mouse users; this covers touch devices)
+              if (isSelected) setIsEditing(true)
+            }}
             className={cn('p-0 outline-none', isEmpty && 'opacity-40')}
             style={{
               minWidth: '100%',
@@ -600,7 +618,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                       <span className="text-xs font-handwriting" style={{ color: hexToRgba(textColor, 0.65) }}>letter</span>
                     </div>
                     <button
-                      onMouseDown={e => { e.stopPropagation(); updateElement(element.id, { data: { ...element.data, opened: false } }, undefined, pageIndex) }}
+                      onPointerDown={e => { e.stopPropagation(); updateElement(element.id, { data: { ...element.data, opened: false } }, undefined, pageIndex) }}
                       className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-black/10 transition-colors cursor-pointer"
                       style={{ color: textColor }}
                     >
@@ -617,6 +635,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                         data: { ...element.data, note: text },
                       }, undefined, pageIndex)
                     }}
+                    onPointerDown={e => e.stopPropagation()}
                     onMouseDown={e => e.stopPropagation()}
                     className="flex-1 px-5 py-4 text-base outline-none overflow-auto font-handwriting leading-relaxed"
                     data-placeholder="Write a note..."
@@ -668,7 +687,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     )
   }
 
-  const handleToolMouseDown = (e: React.MouseEvent) => {
+  const handleToolMouseDown = (e: React.SyntheticEvent) => {
     e.stopPropagation()
   }
 
@@ -681,7 +700,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           {element.type !== 'drawing' && ['nw', 'ne', 'sw', 'se'].map(corner => (
             <div
               key={corner}
-              onMouseDown={e => handleResize(e, corner)} // eslint-disable-line
+              onPointerDown={e => handleResize(e, corner)} // eslint-disable-line -- reads elementRef scale at drag start, not during render
               className="absolute w-3 h-3 bg-white border-2 border-[#d97757] rounded-full hover:scale-125 transition-transform"
               style={{
                 top: corner.includes('n') ? -6 : 'auto',
@@ -689,12 +708,13 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                 left: corner.includes('w') ? -6 : 'auto',
                 right: corner.includes('e') ? -6 : 'auto',
                 cursor: `${corner}-resize`,
+                touchAction: 'none',
               }}
             />
           ))}
           <div className={`absolute ${menuAbove ? '-top-10' : 'bottom-full mb-2'} left-0 flex items-center gap-0.5 bg-white rounded-lg shadow-lg p-1 z-10`}>
             <button
-              onMouseDown={handleToolMouseDown}
+              onPointerDown={handleToolMouseDown}
               onClick={e => { e.stopPropagation(); bringForward(element.id, pageIndex) }}
               className="p-1 hover:bg-[#e5d5b8] rounded cursor-pointer"
               title="Bring forward"
@@ -702,7 +722,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
               <MoveUp className="w-3.5 h-3.5 text-[#8b7355]" />
             </button>
             <button
-              onMouseDown={handleToolMouseDown}
+              onPointerDown={handleToolMouseDown}
               onClick={e => { e.stopPropagation(); sendBackward(element.id, pageIndex) }}
               className="p-1 hover:bg-[#e5d5b8] rounded cursor-pointer"
               title="Send backward"
@@ -712,7 +732,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
             <div className="w-px h-4 bg-[#e5d5b8] mx-0.5" />
             <div className="relative">
               <button
-                onMouseDown={handleToolMouseDown}
+                onPointerDown={handleToolMouseDown}
                 onClick={e => { e.stopPropagation(); setMenuOpen(v => !v) }}
                 className="p-1 hover:bg-[#e5d5b8] rounded cursor-pointer"
                 title="More"
@@ -721,8 +741,8 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
               </button>
               {menuOpen && (
                 <>
-                  <div className="fixed inset-0 z-10" onClick={e => { e.stopPropagation(); setMenuOpen(false) }} />
-                  <div className={`absolute ${menuAbove ? 'top-8' : 'bottom-8'} left-0 bg-white rounded-lg shadow-xl border border-[#e5d5b8] py-1 min-w-[150px] z-20`} onClick={e => e.stopPropagation()}>
+                  <div className="fixed inset-0 z-10" onPointerDown={handleToolMouseDown} onClick={e => { e.stopPropagation(); setMenuOpen(false) }} />
+                  <div className={`absolute ${menuAbove ? 'top-8' : 'bottom-8'} left-0 bg-white rounded-lg shadow-xl border border-[#e5d5b8] py-1 min-w-[150px] z-20`} onPointerDown={handleToolMouseDown} onClick={e => e.stopPropagation()}>
                     {element.type === 'text' && (
                       <div className="px-2 py-1.5 border-b border-[#e5d5b8]">
                         <span className="text-[12px] font-medium text-[#8b7355] uppercase tracking-wider">Font</span>
@@ -784,7 +804,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
             </div>
             <div className="w-px h-4 bg-[#e5d5b8] mx-0.5" />
             <button
-              onMouseDown={handleToolMouseDown}
+              onPointerDown={handleToolMouseDown}
               onClick={e => { e.stopPropagation(); deleteElement(element.id, pageIndex) }}
               className="p-1 hover:bg-red-50 rounded cursor-pointer"
               title="Delete"
@@ -823,7 +843,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       <div
         ref={elementRefCallback}
         data-elem-id={element.id}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handleMouseDown}
         onClick={e => { e.stopPropagation(); setSelectedElementId(element.id) }}
         style={{
           position: 'absolute', left: element.x, top: element.y,

@@ -1,5 +1,7 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useCallback } from 'react'
 import { useDrag } from 'react-dnd'
+import { useJournal } from '../app/contexts/JournalContext'
+import type { CanvasElement } from '@/types/journal'
 
 interface UseToolDragOptions {
   elementType: string
@@ -8,7 +10,12 @@ interface UseToolDragOptions {
   height?: number
 }
 
+// Logical page size is 640x860 (see Canvas); center placement for tap-to-insert
+const PAGE_W = 640
+const PAGE_H = 860
+
 export function useToolDrag({ elementType, data, width = 80, height = 80 }: UseToolDragOptions) {
+  const { addElement } = useJournal()
   const dragItem = useMemo(() => ({ elementType, data, width, height }), [elementType, data, width, height])
 
   const [collected, drag, preview] = useDrag(() => ({
@@ -18,6 +25,21 @@ export function useToolDrag({ elementType, data, width = 80, height = 80 }: UseT
       isDragging: monitor.isDragging(),
     }),
   }), [dragItem])
+
+  // Tap-to-insert fallback: places the tool at the center of the focus page.
+  // Works on every device regardless of drag-and-drop support (touch, Safari,
+  // assistive tech) — dragging stays available where it works.
+  const insert = useCallback(() => {
+    addElement({
+      type: elementType as CanvasElement['type'],
+      x: PAGE_W / 2 - width / 2,
+      y: PAGE_H / 2 - height / 2,
+      width,
+      height,
+      rotation: 0,
+      data: data || {},
+    })
+  }, [addElement, elementType, data, width, height])
 
   useEffect(() => {
     const canvas = document.createElement('canvas')
@@ -57,5 +79,5 @@ export function useToolDrag({ elementType, data, width = 80, height = 80 }: UseT
   }, [preview, elementType])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { ...collected, drag: ((el: HTMLElement | null) => { if (el) drag(el) }) as unknown as React.Ref<any> }
+  return { ...collected, insert, drag: ((el: HTMLElement | null) => { if (el) drag(el) }) as unknown as React.Ref<any> }
 }

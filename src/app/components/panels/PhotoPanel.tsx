@@ -1,6 +1,7 @@
 import { useRef, useState, useMemo } from 'react'
 import { uploadString, getDownloadURL, ref as storageRef } from 'firebase/storage'
 import { storage, auth, isFirebaseReady } from '@/lib/firebase'
+import { storePhotoData, makePhotoRef, usePhotoSrc } from '@/lib/photoBank'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useJournal } from '../../contexts/JournalContext'
@@ -25,7 +26,8 @@ interface UploadedPhoto {
 
 function PhotoThumbnail({ photo, mask, isDark }: { photo: UploadedPhoto; mask: ShapeMask; isDark: boolean }) {
   const data = useMemo(() => ({ src: photo.src, mask }), [photo.src, mask])
-  const { isDragging, drag } = useToolDrag({
+  const thumbSrc = usePhotoSrc(photo.src)
+  const { isDragging, drag, insert } = useToolDrag({
     elementType: 'image',
     data,
     width: 150,
@@ -35,13 +37,14 @@ function PhotoThumbnail({ photo, mask, isDark }: { photo: UploadedPhoto; mask: S
   return (
     <div
       ref={drag}
+      onClick={insert}
       className={cn(
         'group relative rounded-xl overflow-hidden border-2 cursor-grab active:cursor-grabbing transition-all hover:shadow-lg hover:-translate-y-0.5',
         isDark ? 'border-[#45475a] hover:border-terracotta/40' : 'border-border-light hover:border-terracotta/40',
         isDragging && 'opacity-50',
       )}
     >
-      <img src={photo.src} alt={photo.name} className="w-full aspect-square object-cover" />
+      <img src={thumbSrc ?? photo.src} alt={photo.name} className="w-full aspect-square object-cover" />
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
       <div className="absolute bottom-0 left-0 right-0 p-1.5 text-xs text-white bg-gradient-to-t from-black/60 to-transparent truncate font-handwriting">
         {photo.name}
@@ -83,7 +86,9 @@ export default function PhotoPanel() {
         await uploadString(photoRef, dataUrl, 'data_url')
         src = await getDownloadURL(photoRef)
       } catch (err) {
-        console.warn(`[PhotoPanel] Storage upload failed for ${file.name}, keeping local copy:`, err)
+        console.warn(`[PhotoPanel] Storage upload failed for ${file.name}, storing in photo bank:`, err)
+        storePhotoData(id, dataUrl)
+        src = makePhotoRef(id)
       }
     }
     return { id, src, name: file.name }
