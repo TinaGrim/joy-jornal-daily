@@ -6,7 +6,7 @@ import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
 import { mergePageSnapshots } from '@/lib/mergePages'
 import { journalNow } from '@/lib/journalClock'
-import { useFirebaseAuth } from '@/hooks/useFirebaseAuth'
+import { useFirebaseAuth, friendlyAuthError } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
 
 const BACKUP_VERSION = 1
@@ -201,12 +201,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const {
     user: firebaseUser,
     loading: authLoading,
+    error: fbAuthError,
     signInWithGoogle: fbSignIn,
     signOut: fbSignOut,
     isAuthenticated: fbAuthenticated,
   } = useFirebaseAuth()
 
-  const [authError, setAuthError] = useState<string | null>(null)
+  const [localAuthError, setLocalAuthError] = useState<string | null>(null)
   const [localUser, setLocalUser] = useState<{ uid: string; displayName: string } | null>(() => {
     const stored = localStorage.getItem(STORAGE_KEY_UID)
     return stored ? { uid: stored, displayName: 'You' } : null
@@ -215,17 +216,17 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const effectiveUser = firebaseUser ?? localUser
   const isAuthenticated = fbAuthenticated || !!localUser
 
+  // Click-time failures land in localAuthError; redirect-completion failures
+  // (which happen after returning from accounts.google.com, long after any
+  // click handler is gone) arrive via fbAuthError. Show whichever exists.
+  const authError = localAuthError ?? fbAuthError
+
   const signInWithGoogle = useCallback(async () => {
     try {
-      setAuthError(null)
+      setLocalAuthError(null)
       await fbSignIn()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Sign in failed'
-      if (msg.includes('auth/configuration-not-found')) {
-        setAuthError('Google sign-in is not enabled in your Firebase project. Go to Firebase Console → Authentication → Sign-in method → enable Google, or use "Continue without account" below.')
-      } else {
-        setAuthError(msg)
-      }
+      setLocalAuthError(friendlyAuthError(err))
     }
   }, [fbSignIn])
 
@@ -364,7 +365,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
     // Otherwise the cloud state is still unknown (offline fallback);
     // stay uninitialized and decide when the first snapshot arrives.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: publish local data once cloud becomes available
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: publish local data once cloud becomes available
   }, [isAuthenticated, sync.loading, sync.cloudChecked])
 
   useEffect(() => {
@@ -488,18 +489,18 @@ export function JournalProvider({ children }: { children: ReactNode }) {
 
   const savePages = useCallback(
     (updater: (prev: Page[]) => Page[], syncEnabled = true) => {
-    const next = sanitizePages(updater(pagesRef.current))
-    setPages(next)
-    if (storageTimerRef.current) clearTimeout(storageTimerRef.current)
-    storageTimerRef.current = setTimeout(() => {
-      savePagesToStorage(pagesRef.current)
-      storageTimerRef.current = null
-    }, 2000)
-    if (syncEnabled) {
-      sync.savePages(next)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sync.savePages])
+      const next = sanitizePages(updater(pagesRef.current))
+      setPages(next)
+      if (storageTimerRef.current) clearTimeout(storageTimerRef.current)
+      storageTimerRef.current = setTimeout(() => {
+        savePagesToStorage(pagesRef.current)
+        storageTimerRef.current = null
+      }, 2000)
+      if (syncEnabled) {
+        sync.savePages(next)
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sync.savePages])
 
   useEffect(() => {
     const persistNow = () => {
