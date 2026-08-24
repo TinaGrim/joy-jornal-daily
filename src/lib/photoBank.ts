@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer } from 'react'
 import { ref, get, set } from 'firebase/database'
 import { rtdb } from '@/lib/firebase'
 
@@ -43,8 +43,10 @@ export function resolvePhotoSrc(src: unknown): Promise<string | null> {
         cache.set(id, val)
         return val
       }
+      console.warn(`[photoBank] Photo ${id} not found in RTDB`)
       return null
-    } catch {
+    } catch (err) {
+      console.warn(`[photoBank] Failed to resolve photo ${id}:`, err)
       return null
     } finally {
       inFlight.delete(id)
@@ -55,26 +57,24 @@ export function resolvePhotoSrc(src: unknown): Promise<string | null> {
 }
 
 export function usePhotoSrc(src: unknown): string | undefined {
-  const [resolved, setResolved] = useState<string | undefined>(undefined)
+  // The module-level `cache` is read during render (external store pattern);
+  // the async resolution only bumps a counter to re-read it, so setState is
+  // never called synchronously inside the effect body.
+  const [, bump] = useReducer((n: number) => n + 1, 0)
 
   useEffect(() => {
-    if (!isPhotoRef(src)) {
-      setResolved(typeof src === 'string' ? src : undefined)
-      return
-    }
-    const cached = cache.get(photoRefId(src))
-    if (cached !== undefined) {
-      setResolved(cached)
-      return
-    }
-    setResolved(undefined)
+    if (!isPhotoRef(src)) return
+    const id = photoRefId(src)
+    if (cache.has(id)) return
     let cancelled = false
     resolvePhotoSrc(src).then(val => {
-      if (!cancelled && val) setResolved(val)
+      if (!cancelled && val) bump()
     })
     return () => {
       cancelled = true
     }
-  }, [src])
-  return resolved
+  }, [src, bump])
+
+  if (!isPhotoRef(src)) return typeof src === 'string' ? src : undefined
+  return cache.get(photoRefId(src))
 }

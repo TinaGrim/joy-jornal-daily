@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import type { CanvasElement } from '@/types/journal'
 import { useJournal } from '../contexts/JournalContext'
-import { usePhotoSrc } from '@/lib/photoBank'
+import { usePhotoSrc, isPhotoRef } from '@/lib/photoBank'
 import { cn } from '@/lib/utils'
 import { Trash2, MoveUp, MoveDown, Plane, Compass, Camera, Luggage, X, Mail, Heart, MoreVertical, Copy } from 'lucide-react'
 
@@ -45,6 +45,15 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
   const isMultiSelected = selectedElementIds.length > 0 && selectedElementIds.includes(element.id)
   const [menuOpen, setMenuOpen] = useState(false)
   const photoSrc = usePhotoSrc(element.data.src)
+  // Never render the raw `jv2photo:` ref — browsers can't fetch that scheme
+  // (net::ERR_UNKNOWN_URL_SCHEME). Hold the img back until the data URL resolves.
+  const rawSrc = element.data.src as string | undefined
+  const imgSrc = photoSrc ?? (typeof rawSrc === 'string' && !isPhotoRef(rawSrc) ? rawSrc : undefined)
+  // Selection state as of the start of this pointer interaction. React flushes
+  // the selection update from pointerdown before the click event fires, so
+  // checking live `isSelected` in onClick makes a single tap jump straight into
+  // editing, hiding the toolbar before the user ever sees it.
+  const wasSelectedRef = useRef(false)
 
   const FONTS = ['Caveat', 'Playfair Display', 'Source Serif 4', 'Dancing Script', 'Inter', 'monospace']
 
@@ -55,6 +64,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
     if (!e.isPrimary) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.stopPropagation()
+    wasSelectedRef.current = isSelected
     setFocusPageIndex(pageIndex)
     setSelectedElementId(element.id)
 
@@ -318,7 +328,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                 <circle cx="98" cy="55" r="8" fill="white" />
                 <circle cx="97" cy="70" r="7" fill="white" />
 
-                <image href={photoSrc ?? (element.data.src as string)} x="4" y="8" width="92" height="84" preserveAspectRatio="xMidYMid slice" clipPath={`url(#w-${cid})`} />
+                <image href={imgSrc} x="4" y="8" width="92" height="84" preserveAspectRatio="xMidYMid slice" clipPath={`url(#w-${cid})`} />
 
                 <rect x="4" y="8" width="92" height="84" rx="3" fill="none" stroke="#A8C8E0" strokeWidth="1" />
 
@@ -349,7 +359,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           return (
             <div className="w-full h-full bg-white p-2 shadow-lg rounded-sm">
               <img
-                src={photoSrc ?? (element.data.src as string)}
+                src={imgSrc}
                 alt=""
                 draggable={false}
                 className="w-full h-full object-cover rounded-sm"
@@ -361,7 +371,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
           return (
             <div className="w-full h-full relative" style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.15))' }}>
               <img
-                src={photoSrc ?? (element.data.src as string)}
+                src={imgSrc}
                 alt=""
                 draggable={false}
                 className="w-full h-full object-cover"
@@ -372,7 +382,7 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
         }
         return (
           <img
-            src={photoSrc ?? (element.data.src as string)}
+            src={imgSrc}
             alt=""
             draggable={false}
             className="w-full h-full object-cover"
@@ -436,8 +446,10 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
             onClick={e => {
               e.stopPropagation()
               // Tap-to-edit: a tap on an already-selected text opens the editor
-              // (double-click stays for mouse users; this covers touch devices)
-              if (isSelected) setIsEditing(true)
+              // (double-click stays for mouse users; this covers touch devices).
+              // Uses the selection state from before this interaction started,
+              // otherwise the first tap would select AND edit in one go.
+              if (wasSelectedRef.current) setIsEditing(true)
             }}
             className={cn('p-0 outline-none', isEmpty && 'opacity-40')}
             style={{

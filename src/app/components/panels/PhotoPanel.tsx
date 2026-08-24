@@ -1,7 +1,7 @@
 import { useRef, useState, useMemo } from 'react'
 import { uploadString, getDownloadURL, ref as storageRef } from 'firebase/storage'
 import { storage, auth, isFirebaseReady } from '@/lib/firebase'
-import { storePhotoData, makePhotoRef, usePhotoSrc } from '@/lib/photoBank'
+import { storePhotoData, makePhotoRef, usePhotoSrc, isPhotoRef } from '@/lib/photoBank'
 import { useToolDrag } from '@/hooks/useToolDrag'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useJournal } from '../../contexts/JournalContext'
@@ -44,7 +44,11 @@ function PhotoThumbnail({ photo, mask, isDark }: { photo: UploadedPhoto; mask: S
         isDragging && 'opacity-50',
       )}
     >
-      <img src={thumbSrc ?? photo.src} alt={photo.name} className="w-full aspect-square object-cover" />
+      <img
+        src={thumbSrc ?? (!isPhotoRef(photo.src) ? photo.src : undefined)}
+        alt={photo.name}
+        className="w-full aspect-square object-cover bg-[#313244]/40"
+      />
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
       <div className="absolute bottom-0 left-0 right-0 p-1.5 text-xs text-white bg-gradient-to-t from-black/60 to-transparent truncate font-handwriting">
         {photo.name}
