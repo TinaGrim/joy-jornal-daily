@@ -172,9 +172,12 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       }
 
       const pageEls = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]')).reverse()
+      // No tolerance margin here: the seam artwork intentionally overflows
+      // past its page edge, and a padded rect made releases next to the
+      // spine transfer the element unexpectedly.
       const target = pageEls.find(el => {
         const r = el.getBoundingClientRect()
-        return e.clientX >= r.left - 3 && e.clientX <= r.right + 3 && e.clientY >= r.top && e.clientY <= r.bottom
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
       })
       if (target) {
         const toPage = parseInt(target.getAttribute('data-page-index')!)
@@ -270,6 +273,12 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
       if (corner.includes('s')) newHeight = Math.max(40, startHeight + dy)
       if (corner.includes('w')) { newWidth = Math.max(40, startWidth - dx); newX = startPosX + dx }
       if (corner.includes('n')) { newHeight = Math.max(40, startHeight - dy); newY = startPosY + dy }
+
+      // Keep the element on the page while resizing, same bounds as dragging.
+      newWidth = Math.min(newWidth, 640)
+      newHeight = Math.min(newHeight, 860)
+      newX = Math.max(0, Math.min(640 - newWidth, newX))
+      newY = Math.max(0, Math.min(860 - newHeight, newY))
 
       updateElement(element.id, { width: newWidth, height: newHeight, x: newX, y: newY }, false, pageIndex)
     }
