@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createSync, type BroadcastSync } from '@/lib/broadcastSync'
 import { createFirebaseSync, type FirebaseSync, type CheckpointInfo } from '@/lib/firebaseSync'
 import { isFirebaseReady } from '@/lib/firebase'
@@ -360,7 +360,8 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     await fbSyncRef.current?.deleteCheckpoint(id)
   }, [])
 
-  return {
+  const memoCursors = remoteCursors
+  return useMemo(() => ({
     pages,
     loading,
     cloudChecked,
@@ -369,7 +370,7 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     flushPages,
     saveUserCursor,
     isConnected,
-    remoteCursors,
+    remoteCursors: memoCursors,
     metadata,
     saveMetadata,
     broadcastOperation,
@@ -379,5 +380,5 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     deleteCheckpoint,
     lastLatency,
     peakLatency,
-  }
+  }), [pages, loading, cloudChecked, error, savePages, flushPages, saveUserCursor, isConnected, memoCursors, metadata, saveMetadata, broadcastOperation, saveCheckpoint, getHistory, loadCheckpoint, deleteCheckpoint, lastLatency, peakLatency])
 }

@@ -53,8 +53,15 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       console.warn('[useFirebaseAuth] Firebase not initialized')
       return
     }
+    // Redirect (not popup): mobile browsers block popups, and the redirect
+    // result is picked up by getRedirectResult above on return.
     const provider = new GoogleAuthProvider()
-    await signInWithRedirect(auth, provider)
+    try {
+      await signInWithRedirect(auth, provider)
+    } catch (err) {
+      console.error('[useFirebaseAuth] Google sign-in failed:', err)
+      throw err
+    }
   }, [])
 
   const signInAnonymously = useCallback(async () => {

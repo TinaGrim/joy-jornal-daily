@@ -229,12 +229,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     }
   }, [fbSignIn])
 
-  // Guest session uses a local uid. Note: switching this to Firebase
-  // anonymous auth (signInAnonymously) currently hard-freezes headless
-  // Chromium renderers during the SDK's persistence init, and the Anonymous
-  // provider is disabled server-side anyway (ADMIN_ONLY_OPERATION). Revisit
-  // only together with enabling the provider in Firebase Console AND testing
-  // on real devices.
+  // Guest session uses a local uid. The Anonymous provider is disabled
+  // server-side anyway (ADMIN_ONLY_OPERATION); real signInAnonymously would
+  // also require enabling it in Firebase Console. Revisit only together with
+  // console changes and testing on real devices.
   const signInAnonymously = useCallback(() => {
     let uid = localStorage.getItem(STORAGE_KEY_UID)
     if (!uid) {
@@ -262,11 +260,18 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const syncPeakLatency = sync.peakLatency
 
   const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([])
+  // Access getHistory through a ref: depending on `sync` directly made this
+  // callback's identity change on every render, and the refresh effect below
+  // would then setState a fresh array each pass — an infinite render loop
+  // that froze the whole app the moment any auth state change re-rendered
+  // the provider (the "unresponsive after Google sign-in" bug).
+  const getHistoryRef = useRef(sync.getHistory)
+  useEffect(() => { getHistoryRef.current = sync.getHistory }, [sync.getHistory])
   const refreshCheckpoints = useCallback(async () => {
-    const list = await sync.getHistory()
+    const list = await getHistoryRef.current()
     setCheckpoints(list)
-  }, [sync])
-  useEffect(() => { // eslint-disable-next-line react-hooks/set-state-in-effect -- init checkpoints from Firebase
+  }, [])
+  useEffect(() => {
     refreshCheckpoints()
   }, [refreshCheckpoints])
 
