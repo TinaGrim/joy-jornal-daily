@@ -560,9 +560,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const now = journalNow()
     const snapIds = new Set<string>()
     for (const p of snapshot) for (const el of p.elements ?? []) snapIds.add(el.id)
+    // Re-stamp timestamps so the restored state wins the newest-timestamp
+    // merge, but KEEP each element's deletion state as of the snapshot.
+    // Blanket-reviving everything resurrected every tombstone riding along
+    // in old snapshots, so one Ctrl+Z brought back many long-dead elements
+    // instead of just the last one undone.
     const revived = snapshot.map(p => ({
       ...p,
-      elements: (p.elements ?? []).map(el => ({ ...el, data: { ...el.data, _deleted: false, _updatedAt: now } })),
+      elements: (p.elements ?? []).map(el => ({ ...el, data: { ...el.data, _deleted: el.data?._deleted === true, _updatedAt: now } })),
     }))
     const withExtras = revived.map((p, i) => {
       const extras = (pagesRef.current[i]?.elements ?? [])
