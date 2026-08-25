@@ -432,14 +432,19 @@ export default function DraggableElement({ element, isActive, pageIndex }: Dragg
                 setIsEditing(false)
                 const el = e.currentTarget
                 const text = el.textContent || ''
+                // A box that was still empty when this edit session started
+                // (fresh double-click creation) joins the creation's undo step:
+                // one Ctrl+Z removes the whole element and no "empty text"
+                // state ever appears on the undo stack.
+                const skipUndo = !((element.data.text as string) || '').trim()
                 if (text.trim()) {
                   updateElement(element.id, {
                     width: Math.max(40, el.scrollWidth),
                     height: Math.max(20, el.scrollHeight),
                     data: { ...element.data, text },
-                  }, undefined, pageIndex)
+                  }, undefined, pageIndex, { skipUndo })
                 } else {
-                  deleteElement(element.id, pageIndex)
+                  deleteElement(element.id, pageIndex, { skipUndo })
                 }
               }}
               className="p-0 outline-none"

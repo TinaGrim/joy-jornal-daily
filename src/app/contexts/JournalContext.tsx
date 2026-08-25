@@ -144,8 +144,8 @@ interface JournalContextType {
   getFocusPageIndex: () => number
   transferElement: (elementId: string, fromPage: number, toPage: number, newX: number, newY: number) => void
   addElement: (element: Omit<CanvasElement, 'id' | 'zIndex'>, pageIdx?: number) => string
-  updateElement: (id: string, updates: Partial<CanvasElement>, syncEnabled?: boolean, pageIdx?: number) => void
-  deleteElement: (id: string, pageIdx?: number) => void
+  updateElement: (id: string, updates: Partial<CanvasElement>, syncEnabled?: boolean, pageIdx?: number, opts?: { skipUndo?: boolean }) => void
+  deleteElement: (id: string, pageIdx?: number, opts?: { skipUndo?: boolean }) => void
   deleteElements: (ids: string[], pageIdx?: number) => void
   replacePageElements: (elements: CanvasElement[]) => void
   clearPage: () => void
@@ -519,18 +519,36 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   // timestamps so the restored state wins the newest-timestamp merge on
   // every device, and elements created after the snapshot are tombstoned so
   // they cannot resurrect through the union merge.
+  //
+  // Coalescing is per-element, not blind time-based: rapid commits only fold
+  // into the previous step while the SAME element(s) keep changing (held
+  // arrow keys, quick repeat tweaks). A change touching different elements
+  // always becomes its own step, so one Ctrl+Z undoes exactly one element's
+  // operation. Callers can also pass undoOpt 'skip' to join the pending step
+  // (e.g. filling in a freshly created empty text box) so an empty box never
+  // becomes an undo destination.
   const UNDO_MAX = 60
   const UNDO_COALESCE_MS = 450
   const undoStackRef = useRef<Page[][]>([])
   const redoStackRef = useRef<Page[][]>([])
   const lastUndoPushRef = useRef(0)
+  const lastUndoIdsRef = useRef<Set<string> | null>(null)
   const [undoDepth, setUndoDepth] = useState(0)
   const [redoDepth, setRedoDepth] = useState(0)
 
-  const pushUndoSnapshot = useCallback((force: boolean) => {
+  const pushUndoSnapshot = useCallback((force: boolean, affectedIds?: string[]) => {
     const now = Date.now()
-    if (!force && now - lastUndoPushRef.current < UNDO_COALESCE_MS) return
+    if (
+      !force &&
+      now - lastUndoPushRef.current < UNDO_COALESCE_MS &&
+      affectedIds?.length &&
+      lastUndoIdsRef.current?.size &&
+      affectedIds.some(id => lastUndoIdsRef.current!.has(id))
+    ) {
+      return
+    }
     lastUndoPushRef.current = now
+    lastUndoIdsRef.current = affectedIds?.length ? new Set(affectedIds) : null
     undoStackRef.current.push(JSON.parse(JSON.stringify(pagesRef.current)) as Page[])
     if (undoStackRef.current.length > UNDO_MAX) undoStackRef.current.shift()
     redoStackRef.current = []
@@ -567,6 +585,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     setUndoDepth(undoStackRef.current.length)
     setRedoDepth(redoStackRef.current.length)
     lastUndoPushRef.current = 0
+    lastUndoIdsRef.current = null
     publishRestored(snapshot)
   }, [publishRestored])
 
@@ -577,12 +596,20 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     setUndoDepth(undoStackRef.current.length)
     setRedoDepth(redoStackRef.current.length)
     lastUndoPushRef.current = 0
+    lastUndoIdsRef.current = null
     publishRestored(snapshot)
   }, [publishRestored])
 
   const savePages = useCallback(
-    (updater: (prev: Page[]) => Page[], syncEnabled = true, undoForce = false) => {
-      if (syncEnabled || undoForce) pushUndoSnapshot(undoForce)
+    (updater: (prev: Page[]) => Page[], syncEnabled = true, undoOpt: boolean | 'skip' = false, affectedIds?: string[]) => {
+      if (undoOpt === 'skip') {
+        // The change joins the pending undo step; stale redo entries are
+        // still obsolete though.
+        redoStackRef.current = []
+        setRedoDepth(0)
+      } else if (syncEnabled || undoOpt) {
+        pushUndoSnapshot(undoOpt === true, affectedIds)
+      }
       const next = sanitizePages(updater(pagesRef.current))
       setPages(next)
       if (storageTimerRef.current) clearTimeout(storageTimerRef.current)
@@ -638,12 +665,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       const updated = [...prev]
       updated[idx] = { ...page, elements: [...page.elements, newElement] }
       return updated
-    }, true, true)
+    }, true, true, [newElement.id])
     sync.broadcastOperation({ type: 'element-add', pageIndex: idx, element: newElement })
     return newElement.id
   }, [savePages, sync.broadcastOperation])
 
-  const updateElement = useCallback((id: string, updates: Partial<CanvasElement>, syncEnabled = true, pageIdx?: number) => {
+  const updateElement = useCallback((id: string, updates: Partial<CanvasElement>, syncEnabled = true, pageIdx?: number, opts?: { skipUndo?: boolean }) => {
     const idx = pageIdx ?? focusPageIndexRef.current
     savePages(prev => {
       const updated = [...prev]
@@ -654,13 +681,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         ),
       }
       return updated
-    }, syncEnabled)
+    }, syncEnabled, opts?.skipUndo ? 'skip' : false, [id])
     if (syncEnabled) {
       sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId: id, patch: { ...updates, data: { ...((updates as any).data || {}), [ELEMENT_TS_KEY]: journalNow() } } })
     }
   }, [savePages, sync.broadcastOperation])
 
-  const deleteElement = useCallback((id: string, pageIdx?: number) => {
+  const deleteElement = useCallback((id: string, pageIdx?: number, opts?: { skipUndo?: boolean }) => {
     const idx = pageIdx ?? focusPageIndexRef.current
     savePages(prev => {
       const updated = [...prev]
@@ -671,7 +698,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         ),
       }
       return updated
-    }, true, true)
+    }, true, opts?.skipUndo ? 'skip' : true, [id])
     sync.broadcastOperation({ type: 'element-delete', pageIndex: idx, elementId: id })
   }, [savePages, sync.broadcastOperation])
 
@@ -837,7 +864,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         }),
       }
       return updated
-    }, syncEnabled)
+    }, syncEnabled, false, Object.keys(updates))
     if (syncEnabled) {
       for (const elementId of Object.keys(updates)) {
         sync.broadcastOperation({ type: 'element-update', pageIndex: idx, elementId, patch: { ...updates[elementId], data: { ...(updates[elementId].data || {}), [ELEMENT_TS_KEY]: journalNow() } } })
@@ -897,21 +924,25 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       occasions: occasions ?? [],
       journeyDetails,
     }
+    // Embedding every checkpoint duplicated the whole book per snapshot
+    // (~10 MB for a ~200 KB journal). Only the newest checkpoint is embedded;
+    // the full history stays in the cloud.
     const checkpointsList = await sync.getHistory()
-    const checkpointData: Record<string, Page[]> = {}
-    for (const cp of checkpointsList) {
-      const data = await sync.loadCheckpoint(cp.id)
-      if (data) checkpointData[cp.id] = data
+    let latestCheckpoint: Page[] | null = null
+    if (checkpointsList.length > 0) {
+      latestCheckpoint = await sync.loadCheckpoint(checkpointsList[0].id)
     }
     const backup = {
       version: BACKUP_VERSION,
       exportedAt: new Date().toISOString(),
       pages: pagesRef.current,
       metadata: meta,
-      checkpoints: checkpointData,
-      checkpointMeta: checkpointsList,
+      checkpoint: latestCheckpoint,
+      checkpointMeta: checkpointsList.slice(0, 1),
     }
-    const json = JSON.stringify(backup, null, 2)
+    // Minified: pretty-printing turned drawing strokes into hundreds of
+    // thousands of lines.
+    const json = JSON.stringify(backup)
     const blob = new Blob([json], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

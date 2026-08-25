@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'motion/react'
 import { useJournal } from '../contexts/JournalContext'
 import { useTheme } from '../contexts/ThemeContext'
@@ -6,6 +6,14 @@ import { Heart, Trophy, Calendar, Plus, X, Check, ChevronLeft, ChevronRight } fr
 import ExportButton from './ExportButton'
 
 const ORNAMENT = '\u2766'
+const DESKTOP_WIDTH = 288
+
+// Phones get a near-full-width drawer; desktop keeps the compact 288px rail.
+function computeSidebarWidth(): number {
+  if (typeof window === 'undefined') return DESKTOP_WIDTH
+  if (window.matchMedia('(min-width: 768px)').matches) return DESKTOP_WIDTH
+  return Math.min(Math.round(window.innerWidth * 0.9), 400)
+}
 
 interface LeftSidebarProps {
   open: boolean
@@ -50,6 +58,13 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
 
   const daysUntil = computeDaysUntil(anniversaryDate)
 
+  const [width, setWidth] = useState(computeSidebarWidth)
+  useEffect(() => {
+    const onResize = () => setWidth(computeSidebarWidth())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
   const sortedMilestones = [...milestones].sort((a, b) => {
     if (a.done === b.done) return a.id.localeCompare(b.id)
     return a.done ? 1 : -1
@@ -81,11 +96,11 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
         />
       )}
       <motion.div
-        animate={{ x: open ? 0 : -288 }}
+        animate={{ x: open ? 0 : -width }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
-        className={`relative h-full shadow-lg flex flex-col ${open ? 'pointer-events-auto' : ''}`}
+        className={`relative h-full shadow-lg flex flex-col z-30 ${open ? 'pointer-events-auto' : ''}`}
         style={{
-          width: 288,
+          width,
           background: isDark ? '#1e1e2e' : '#f0e6d3',
           borderRight: isDark ? '2px solid #313244' : '2px solid #e8dcc8',
           backgroundImage: isDark ? 'none' : `
@@ -94,7 +109,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
           `,
         }}
       >
-        <div className="min-w-72 flex-1 flex flex-col relative">
+        <div className="flex-1 flex flex-col relative">
           <div className="sticky top-0 z-10 p-3 flex items-center justify-between" style={{
             background: isDark ? '#1e1e2e' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
             borderBottom: isDark ? '2px solid #313244' : '2px solid #e8dcc8',
@@ -348,7 +363,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
         onClick={onToggle}
         className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-r-md shadow-sm z-30 transition-colors cursor-pointer pointer-events-auto"
         style={{
-          left: open ? 288 : 0,
+          left: open ? width : 0,
           transition: 'left 0.25s ease-in-out',
           background: isDark ? '#313244' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
           border: isDark ? '2px solid #45475a' : '2px solid #e8dcc8',

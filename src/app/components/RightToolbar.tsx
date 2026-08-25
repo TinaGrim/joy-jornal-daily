@@ -45,6 +45,14 @@ const panelComponents: Record<string, React.FC> = {
 }
 
 const PANEL_WIDTH = 360
+const TOOL_RAIL_WIDTH = 48
+
+// On phones the drawer opens nearly edge-to-edge; desktop keeps 360px.
+function computeTotalWidth(): number {
+  if (typeof window === 'undefined') return PANEL_WIDTH + 8
+  if (window.matchMedia('(min-width: 768px)').matches) return PANEL_WIDTH + 8
+  return Math.min(Math.max(Math.round(window.innerWidth - 20), PANEL_WIDTH + 8), 480)
+}
 
 export default function RightToolbar() {
   const [open, setOpen] = useState(false)
@@ -54,10 +62,17 @@ export default function RightToolbar() {
   const isDark = theme === 'night'
   const PanelComponent = activePanel ? panelComponents[activePanel] : null
   const containerRef = useRef<HTMLDivElement>(null)
+  const [totalWidth, setTotalWidth] = useState(computeTotalWidth)
 
   useEffect(() => {
-    setRightPanelWidth(open ? PANEL_WIDTH : 0)
-  }, [open, setRightPanelWidth])
+    const onResize = () => setTotalWidth(computeTotalWidth())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  useEffect(() => {
+    setRightPanelWidth(open ? totalWidth : 0)
+  }, [open, totalWidth, setRightPanelWidth])
 
   const manager = useDragDropManager()
 
@@ -103,18 +118,18 @@ export default function RightToolbar() {
       )}
 
       <motion.div
-        animate={{ x: open ? 0 : PANEL_WIDTH + 8 }}
+        animate={{ x: open ? 0 : totalWidth + 8 }}
         transition={{ duration: 0.25, ease: 'easeInOut' }}
         className={`relative h-full shadow-lg flex z-30 ${open ? 'pointer-events-auto' : ''}`}
         style={{
-          width: PANEL_WIDTH + 8,
+          width: totalWidth,
         }}
       >
         {/* Tool buttons */}
         <div
           className={`flex flex-col items-center pt-4 pb-2 gap-1 border-l ${isDark ? 'bg-[#1e1e2e] border-[#313244]' : 'bg-[#f0e6d3] border-[#e8dcc8]'}`}
           style={{
-            width: 48,
+            width: TOOL_RAIL_WIDTH,
             backgroundImage: isDark ? 'none' : `
               repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(139,115,85,0.02) 2px, rgba(139,115,85,0.02) 3px),
               repeating-linear-gradient(90deg, transparent, transparent 30px, rgba(139,115,85,0.012) 30px, rgba(139,115,85,0.012) 31px)
@@ -202,7 +217,7 @@ export default function RightToolbar() {
         }}
         className="absolute top-1/2 -translate-y-1/2 h-14 w-5 flex items-center justify-center rounded-l-md shadow-sm z-30 transition-colors cursor-pointer pointer-events-auto"
         style={{
-          right: open ? PANEL_WIDTH + 8 : 0,
+          right: open ? totalWidth : 0,
           transition: 'right 0.25s ease-in-out',
           background: isDark ? '#313244' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
           border: isDark ? '2px solid #45475a' : '2px solid #e8dcc8',
