@@ -163,7 +163,7 @@ const pageOneElements: CanvasElement[] = [
     height: 120,
     rotation: -6,
     zIndex: 4,
-    data: { sticker: 'palm', label: 'Palm sticker' },
+    data: { src: '🌴', label: 'Palm sticker' },
   },
   {
     id: 'demo-p1-shape',
@@ -233,7 +233,7 @@ const pageTwoElements: CanvasElement[] = [
     height: 110,
     rotation: 8,
     zIndex: 5,
-    data: { sticker: 'shell', label: 'Shell sticker' },
+    data: { src: '🐚', label: 'Shell sticker' },
   },
 ]
 
@@ -292,7 +292,7 @@ const pageThreeElements: CanvasElement[] = [
     height: 120,
     rotation: -4,
     zIndex: 5,
-    data: { sticker: 'star', label: 'Star sticker' },
+    data: { src: '🌟', label: 'Star sticker' },
   },
 ]
 
