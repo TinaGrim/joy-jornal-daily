@@ -1,3 +1,5 @@
+<img width="800" height="600" alt="image" src="https://github.com/user-attachments/assets/08a5b273-c2bd-4b96-9e44-12d8fdb05909" />
+
 # Joy Journey Daily ✈️
 
 A **collaborative digital travel journal** for couples, friends, and solo travelers. Create beautiful scrapbook-style pages with photos, drawings, text, stickers, emoji, and interactive envelopes — all in **real-time** with your travel partner.
