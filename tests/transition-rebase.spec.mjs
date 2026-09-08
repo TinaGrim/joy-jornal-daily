@@ -13,6 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { computeDemoToGoogleRebase, liveStateBelongsToRealJournal, mayMergeCloudWithLiveState } from '../src/lib/journalTransition.ts'
+import { repairDemoMixedJournalPages, isDemoElementId, isDemoMetadata } from '../src/lib/demoMixRepair.ts'
 
 const identity = (x) => x
 
@@ -87,4 +88,72 @@ test('mayMergeCloudWithLiveState: blocks every window where live state is demo c
   // In demo mode the live source should be 'demo', so combination is blocked
   // even if a stale ref said 'real' (defense in depth).
   assert.equal(mayMergeCloudWithLiveState(true, true, 'real'), false)
+})
+
+// Self-healing repair for the "sign-in mixed with anonymous book" corruption:
+// the pre-fix flip fused the demo book into the real journal (pages 0-3 +
+// metadata). All demo content carries a `demo-` id prefix, so it is stripped
+// deterministically — but only when the book ALSO contains real pages, so an
+// intentionally adopted pure-demo book is never gutted.
+
+const realPage = { id: 'real-page', elements: [{ id: 'el-1', type: 'text', data: { text: 'r' } }] }
+const demoPage = {
+  id: 'demo-cover',
+  elements: [
+    { id: 'demo-cover-title', type: 'text', data: { text: 'Island' } },
+    { id: 'el-2', type: 'text', data: { text: 'kept' } },
+  ],
+}
+
+test('repair strips demo pages + demo elements from a mixed real journal', () => {
+  const out = repairDemoMixedJournalPages([demoPage, realPage])
+  assert.deepEqual(out.pages, realPage ? [{ ...realPage }] : [])
+  assert.equal(out.pagesRemoved, true)
+  // Demo elements live in the demo page (removed wholesale by pagesRemoved),
+  // not in any real page, so elementsRemoved stays false here.
+  assert.equal(out.elementsRemoved, false)
+  // The real page's own elements are untouched.
+  assert.deepEqual(out.pages[0].elements, realPage.elements)
+})
+
+test('repair leaves an adopted pure-demo book intact (never guts FR-010/011)', () => {
+  const pure = [demoPage]
+  const out = repairDemoMixedJournalPages(pure)
+  assert.equal(out.pagesRemoved, false)
+  assert.equal(out.elementsRemoved, false)
+  assert.deepEqual(out.pages, pure)
+})
+
+test('repair strips demo elements mixed into a real page', () => {
+  const mixed = [{
+    id: 'real-page',
+    elements: [
+      { id: 'el-1', type: 'text', data: { text: 'real' } },
+      { id: 'demo-pasted', type: 'text', data: { text: 'from demo' } },
+    ],
+  }]
+  const out = repairDemoMixedJournalPages(mixed)
+  assert.equal(out.pagesRemoved, false)
+  assert.equal(out.elementsRemoved, true)
+  assert.deepEqual(out.pages[0].elements, [{ id: 'el-1', type: 'text', data: { text: 'real' } }])
+})
+
+test('repair is idempotent: no real content is ever removed', () => {
+  const mixed = [demoPage, realPage]
+  const first = repairDemoMixedJournalPages(mixed)
+  const second = repairDemoMixedJournalPages(first.pages)
+  assert.equal(second.pagesRemoved, false)
+  assert.equal(second.elementsRemoved, false)
+  assert.deepEqual(second.pages, first.pages)
+})
+
+test('isDemoMetadata detects the shipped anonymous demo metadata', () => {
+  const demoMeta = { anniversaryDate: '02.08.2026', milestones: [], occasions: [], journeyDetails: { title: 'Island Escape Notes', dates: 'August 2-5, 2026', destination: 'Santorini', flag: '🇬🇷' } }
+  assert.equal(isDemoMetadata(demoMeta), true)
+  assert.equal(isDemoMetadata({ ...demoMeta, journeyDetails: null }), false)
+})
+
+test('isDemoElementId prefixes only', () => {
+  assert.equal(isDemoElementId('demo-cover-title'), true)
+  assert.equal(isDemoElementId('el-2'), false)
 })

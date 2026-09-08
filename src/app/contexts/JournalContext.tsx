@@ -26,12 +26,8 @@ import {
   hasAdoptedAccount,
   addAdoptedAccountId,
 } from '@/lib/demoStorage'
-import {
-  computeDemoToGoogleRebase,
-  liveStateBelongsToRealJournal,
-  mayMergeCloudWithLiveState,
-  type LiveJournalSource,
-} from '@/lib/journalTransition'
+import { computeDemoToGoogleRebase, liveStateBelongsToRealJournal, mayMergeCloudWithLiveState, type LiveJournalSource } from '@/lib/journalTransition'
+import { repairDemoMixedJournalPages, isDemoMetadata } from '@/lib/demoMixRepair'
 
 const BACKUP_VERSION = 1
 
@@ -452,7 +448,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     // Only publish local pages once Firebase has confirmed the cloud is
     // actually empty (cloudChecked). After the 10s offline fallback the
     // cloud state is unknown, and seeding would enshrine a stale book.
-    const local = deduplicatePageElements(sanitizePages(pagesRef.current))
+    // Auto-repair: never seed/publish demo content fused into the real book.
+    const local = repairDemoMixedJournalPages(deduplicatePageElements(sanitizePages(pagesRef.current))).pages
     if (sync.pages.length === 0 && sync.cloudChecked) {
       initializedRef.current = true
       if (isDefaultTemplate(local)) {
@@ -494,16 +491,21 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       { pages: incoming, updatedAt: 0, deviceId: 'cloud' },
       { pages: local, updatedAt: 0, deviceId: 'local' },
     ])
+    // Auto-heal the already-published mix: the pre-fix flip merged the demo
+    // book into this real journal (local + cloud slots). Strip demo pages and
+    // demo elements from the merged book so the corruption stops self-
+    // perpetuating, and publish the cleaned book back to the cloud.
+    const repaired = repairDemoMixedJournalPages(deduplicatePageElements(sanitizePages(merged)))
     const canonical = (pages: Page[]) =>
       pages.map(p => ({ ...p, elements: [...(p.elements ?? [])].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) }))
-    if (JSON.stringify(canonical(pagesRef.current)) === JSON.stringify(canonical(merged))) return
-    setPages(merged)
-    savePagesToStorage(merged)
+    if (JSON.stringify(canonical(pagesRef.current)) === JSON.stringify(canonical(repaired.pages))) return
+    setPages(repaired.pages)
+    savePagesToStorage(repaired.pages)
     // Publish the converged book back to this origin's cloud slot, so every
     // origin's slot converges on the same content instead of each origin
     // retaining a divergent copy. Never publish the untouched template.
-    if (!isDefaultTemplate(local)) {
-      sync.savePages(merged)
+    if (!isDefaultTemplate(deduplicatePageElements(sanitizePages(pagesRef.current)))) {
+      sync.savePages(repaired.pages)
     }
   }, [sync.pages, sync.savePages, isDemo])
 
@@ -562,7 +564,11 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const key = JSON.stringify(meta)
     if (key === metaPrevRef.current) return
     metaPrevRef.current = key
-    if (isDemo) {
+    // Gate on the live source, not isDemo alone: during the demo→google flip
+    // the live metadata is still the demo book's while isDemo is already
+    // false. Writing it to journal_metadata / Firebase here is exactly the
+    // "left panel replaced by the anonymous book" bug.
+    if (isDemo || !liveStateBelongsToRealJournal(liveJournalSourceRef.current)) {
       // Demo metadata lives ONLY in demo-scoped storage; it must never reach
       // journal_metadata, Firebase, or the shared metadata BroadcastChannel.
       setDemoMetadata(meta)
@@ -584,8 +590,24 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (isDemo) return
     if (!sync.metadata) return
-    const current: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
-    if (JSON.stringify(current) === JSON.stringify(sync.metadata)) return
+    // Cloud metadata may still be the anonymous demo book's (published by the
+    // pre-fix flip window). Never apply it — restore real local metadata (or,
+    // if the real key was itself overwritten, a fresh template) instead.
+    if (isDemoMetadata(sync.metadata)) {
+      const current: JournalMetadata = { anniversaryDate, milestones: milestones ?? [], occasions: occasions ?? [], journeyDetails }
+      if (isDemoMetadata(current)) {
+        const real = loadMetadataFromStorage()
+        const target = real && !isDemoMetadata(real) ? real : getDefaultMetadata()
+        setAnniversaryDate(target.anniversaryDate)
+        setMilestones(target.milestones ?? [])
+        setOccasions(target.occasions ?? [])
+        setJourneyDetails(target.journeyDetails)
+        saveMetadataToStorage(target)
+      }
+      return
+    }
+    const current2: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
+    if (JSON.stringify(current2) === JSON.stringify(sync.metadata)) return
     // If local metadata was loaded from localStorage, don't let Firebase overwrite with defaults
     if (hadLocalMetadataRef.current && JSON.stringify(sync.metadata) === JSON.stringify(getDefaultMetadata())) return
     firebaseMetaReceiveRef.current = true

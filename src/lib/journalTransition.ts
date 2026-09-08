@@ -1,5 +1,6 @@
-import type { Page } from '@/types/journal'
-import type { JournalMetadata } from '@/lib/syncTypes'
+import type { Page } from '../types/journal.ts'
+import type { JournalMetadata } from './syncTypes.ts'
+import { repairDemoMixedJournalPages, isDemoMetadata } from './demoMixRepair.ts'
 
 export interface JournalTransitionResult {
   pages: Page[]
@@ -65,10 +66,17 @@ export interface DemoToGoogleRebaseInput {
  */
 export function computeDemoToGoogleRebase(input: DemoToGoogleRebaseInput): JournalTransitionResult {
   const defaultMeta = input.getDefaultMetadata()
-  const realMeta = input.loadRealMetadata() ?? defaultMeta
-  const pages = input.dedupe(input.sanitize(input.loadRealPages() ?? input.getDefaultPages()))
+  // A pre-fix session may have written the anonymous demo metadata into the
+  // real journal_metadata key; never carry that identity into a google session.
+  const rawRealMeta = input.loadRealMetadata() ?? defaultMeta
+  const realMeta = isDemoMetadata(rawRealMeta) ? defaultMeta : rawRealMeta
+  const rawPages = input.loadRealPages() ?? input.getDefaultPages()
+  // Strip any demo pages/elements already fused into the real book (the
+  // sign-in-mixed-with-demo corruption), so the cloud init/merge/save paths
+  // start from a clean real journal.
+  const repaired = repairDemoMixedJournalPages(input.dedupe(input.sanitize(rawPages)))
   return {
-    pages,
+    pages: repaired.pages,
     metadata: {
       anniversaryDate: realMeta.anniversaryDate ?? defaultMeta.anniversaryDate,
       milestones: realMeta.milestones ?? defaultMeta.milestones,
