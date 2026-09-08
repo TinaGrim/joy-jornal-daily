@@ -306,6 +306,73 @@ await scenario(browser, 'SC-010 stacked duplicates collapse to one visual on loa
   } finally { await ctx.close() }
 })
 
+// SC-011 — Export: PDF carries EVERY page in the book (not just the visible
+// spread) and PNG is one sheet of all pages; pages render with the real page
+// chrome.
+const EXPORT_PAGES = [
+  { id: 'cover', background: '#c39b6e', pattern: 'blank', elements: [
+    { id: 'cvt', type: 'text', x: 200, y: 360, width: 240, height: 60, rotation: 0, zIndex: 1, data: { text: 'Our Trip', font: 'Playfair Display', fontSize: 40, color: '#ffffff', _updatedAt: 1 } },
+  ] },
+  { id: 'page-1', background: '#fdf6e3', pattern: 'dots', gridSize: 36, elements: [
+    { id: 'e1', type: 'sticker', x: 60, y: 80, width: 100, height: 100, rotation: 0, zIndex: 1, data: { src: '🌊', _updatedAt: 2 } },
+    { id: 'e2', type: 'text', x: 90, y: 220, width: 300, height: 60, rotation: 0, zIndex: 1, data: { text: 'Wave day!', font: 'Caveat', fontSize: 34, color: '#2c3e50', _updatedAt: 3 } },
+    { id: 'e3', type: 'drawing', x: 80, y: 300, width: 260, height: 120, rotation: 0, zIndex: 1, data: { paths: ['M 0 20 L 40 60 L 80 10 L 120 70 L 160 30 L 200 80 L 260 40'], color: '#d97757', strokeWidth: 4, brush: 'pen', _updatedAt: 4 } },
+    { id: 'e4', type: 'emoji', x: 20, y: 500, width: 80, height: 80, rotation: 0, zIndex: 1, data: { emoji: '🐚', _updatedAt: 5 } },
+  ] },
+  { id: 'page-2', background: '#fdf6e3', pattern: 'grid', gridSize: 40, elements: [
+    { id: 'e5', type: 'shape', x: 100, y: 120, width: 160, height: 160, rotation: 0, zIndex: 1, data: { shape: 'circle', fill: '#97a97c', opacity: 0.8, _updatedAt: 6 } },
+    { id: 'e6', type: 'sticker', x: 400, y: 240, width: 90, height: 90, rotation: 0, zIndex: 1, data: { src: '🌸', _updatedAt: 7 } },
+  ] },
+  { id: 'page-3', background: '#fdf6e3', pattern: 'blank', elements: [
+    { id: 'e7', type: 'text', x: 60, y: 140, width: 320, height: 80, rotation: 0, zIndex: 1, data: { text: 'Empty note', font: 'Caveat', fontSize: 28, color: '#2c3e50', _updatedAt: 8 } },
+  ] },
+  { id: 'page-4', background: '#fdf6e3', pattern: 'dots', gridSize: 28, elements: [
+    { id: 'e8', type: 'emoji', x: 200, y: 300, width: 100, height: 100, rotation: 0, zIndex: 1, data: { emoji: '💌', _updatedAt: 9 } },
+  ] },
+]
+const EXPORT_SEED = { 'demo:uid': 'demo', 'demo:pages': JSON.stringify(EXPORT_PAGES) }
+
+await scenario(browser, 'SC-011 export PDF has all pages + PNG sheet organized', async (b) => {
+  const { ctx, page } = await newPage(b, { seeds: EXPORT_SEED })
+  try {
+    await page.getByText(/Pg\s+\d/).waitFor({ timeout: 10000 })
+    await page.waitForTimeout(600)
+    await page.getByTitle('Open sidebar').click()
+    await page.getByTitle(/Close sidebar/).waitFor({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(300)
+
+    const exportBtn = page.getByTitle('Export page')
+    await exportBtn.hover()
+    await page.getByText('Export as PDF', { exact: true }).waitFor({ timeout: 8000 })
+
+    const pdfEvent = page.waitForEvent('download', { timeout: 15000 })
+    await page.getByText('Export as PDF', { exact: true }).click()
+    const pdf = await pdfEvent
+    const pdfName = pdf.suggestedFilename()
+    assert(/journal-.*\.pdf$/.test(pdfName), `PDF filename ${pdfName}`)
+    const pdfBuf = fs.readFileSync(await pdf.path())
+    const pdfHead = pdfBuf.subarray(0, 5).toString()
+    assert(pdfHead === '%PDF-', `PDF signature (${pdfHead})`)
+    const pdfCount = (pdfBuf.toString('latin1').match(/\/Type\s*\/Page\b(?!s)/g) || []).length
+    assert(pdfCount === EXPORT_PAGES.length, `PDF contains all ${EXPORT_PAGES.length} pages (got ${pdfCount})`)
+    assert(!pdfBuf.toString('latin1').includes('Tap to start creating'), 'no empty-page placeholder in the export')
+
+    await exportBtn.hover()
+    await page.getByText('Export as PNG', { exact: true }).waitFor({ timeout: 8000 }).catch(() => exportBtn.hover())
+    const pngEvent = page.waitForEvent('download', { timeout: 15000 })
+    await page.getByText('Export as PNG', { exact: true }).click()
+    const png = await pngEvent
+    const pngBuf = fs.readFileSync(await png.path())
+    assert(pngBuf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'PNG signature')
+    const w = pngBuf.readUInt32BE(16)
+    const h = pngBuf.readUInt32BE(20)
+    assert(w > 2000 && h > 2000, `PNG sheet sized for a 2-column grid (${w}×${h})`)
+
+    assert(page.__pageErrors.length === 0, `no page errors (${page.__pageErrors.join('; ')})`)
+    record('SC-011 export PDF has all pages + PNG sheet organized', true, `pdf=${pdfCount}p, png=${w}x${h}`)
+  } finally { await ctx.close() }
+})
+
 await teardown()
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} scenarios passed`)

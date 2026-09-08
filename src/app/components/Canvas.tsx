@@ -78,12 +78,13 @@ interface CanvasProps {
   page: Page
   pageIndex: number
   side?: 'left' | 'right'
+  exportMode?: boolean
 }
 
-export default function Canvas({ page, pageIndex, side }: CanvasProps) {
+export default function Canvas({ page, pageIndex, side, exportMode = false }: CanvasProps) {
   const { addElement, updateElement, deleteElement, deleteElements, transferElement, currentPageIndex, drawSettings, setDrawSettings, setSelectedElementId, setSelectedElementIds, setFocusPageIndex } = useJournal()
   const canvasRef = useRef<HTMLDivElement>(null)
-  const isActive = pageIndex === currentPageIndex || pageIndex === currentPageIndex + 1
+  const isActive = exportMode ? false : pageIndex === currentPageIndex || pageIndex === currentPageIndex + 1
   const [drawingPath, setDrawingPath] = useState<string | null>(null)
   const isDrawingRef = useRef(false)
   const drawingPathRef = useRef<string | null>(null)
@@ -337,13 +338,13 @@ export default function Canvas({ page, pageIndex, side }: CanvasProps) {
           <DraggableElement key={element.id} element={element} isActive={isActive} pageIndex={pageIndex} />
         ))}
 
-      {(page.elements ?? []).filter(el => !el.data?._deleted).length === 0 && (
+      {(page.elements ?? []).filter(el => !el.data?._deleted).length === 0 && !exportMode && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 select-none">
           <span className="text-[#a89a8a]/40 font-handwriting text-xl tracking-wide">Tap to start creating</span>
         </div>
       )}
 
-      {drawingPath && drawSettings.active && (
+      {drawingPath && drawSettings.active && !exportMode && (
         <svg
           className="absolute inset-0 pointer-events-none z-50"
           width="640"
