@@ -93,6 +93,11 @@ export function useFirebaseAuth(): UseFirebaseAuthReturn {
       return
     }
     const provider = new GoogleAuthProvider()
+    // Always show Google's "Choose an account" screen instead of silently
+    // auto-selecting the session the browser remembers. The picker includes
+    // "Use another account", which lets the user type in any email address
+    // (one they haven't signed in with on this device yet) and continue.
+    provider.setCustomParameters({ prompt: 'select_account' })
     try {
       // Popup first: the result comes straight back to this page (no full
       // reload), and any failure is catchable right here.
