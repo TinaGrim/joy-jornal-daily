@@ -2,6 +2,58 @@ import { Download, Database } from 'lucide-react'
 import { toast } from 'sonner'
 import { useJournal } from '../contexts/JournalContext'
 
+function prepareClone(doc: Document) {
+  doc.querySelectorAll('svg').forEach((svg) => {
+    if (svg.querySelector('rect[filter]') || !svg.getAttribute('width') || !svg.getAttribute('height')) {
+      svg.remove()
+    }
+  })
+}
+
+function pageTargets(book: Element): HTMLElement[] {
+  const pages = Array.from(document.querySelectorAll<HTMLElement>('[data-page-index]'))
+  return pages.length ? pages : [book as HTMLElement]
+}
+
+async function renderElement(el: HTMLElement) {
+  const { default: html2canvas } = await import('html2canvas')
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const promise = html2canvas(el, {
+      backgroundColor: '#f0e6d3',
+      scale: 2,
+      onclone: prepareClone,
+    })
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('render timed out')), 20000)),
+      ])
+    } catch (e) {
+      lastError = e
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+  throw lastError
+}
+
+function stitchPages(canvases: HTMLCanvasElement[]) {
+  const width = canvases.reduce((sum, c) => sum + c.width, 0)
+  const height = Math.max(...canvases.map((c) => c.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')!
+  context.fillStyle = '#f0e6d3'
+  context.fillRect(0, 0, width, height)
+  let x = 0
+  for (const pageCanvas of canvases) {
+    context.drawImage(pageCanvas, x, 0)
+    x += pageCanvas.width
+  }
+  return canvas
+}
+
 export default function ExportButton() {
   const { exportBackup } = useJournal()
 
@@ -13,22 +65,32 @@ export default function ExportButton() {
     }
 
     try {
+      const targets = pageTargets(book)
       if (format === 'png') {
-        const { default: html2canvas } = await import('html2canvas')
-        const canvas = await html2canvas(book as HTMLElement, {
-          backgroundColor: '#f0e6d3',
-          scale: 2,
-        })
+        const canvases = await Promise.all(targets.map((page) => renderElement(page)))
+        const canvas = canvases.length > 1 ? stitchPages(canvases) : canvases[0]
         const link = document.createElement('a')
         link.download = `journal-page-${Date.now()}.png`
         link.href = canvas.toDataURL('image/png')
         link.click()
         toast.success('Page exported as PNG!')
-      } else {
-        toast.success('PDF export coming soon!')
+        return
       }
-    } catch {
-      toast.error('Export failed. Try again.')
+
+      const { jsPDF } = await import('jspdf')
+      const canvases = await Promise.all(targets.map((page) => renderElement(page)))
+      const [first] = canvases
+      const w = first.width / 2
+      const h = first.height / 2
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'px', format: [w, h], compress: true })
+      canvases.forEach((canvas, i) => {
+        if (i > 0) doc.addPage([canvas.width / 2, canvas.height / 2], 'portrait')
+        doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, canvas.width / 2, canvas.height / 2)
+      })
+      doc.save(`journal-${Date.now()}.pdf`)
+      toast.success('Journal exported as PDF!')
+    } catch (e) {
+      toast.error(`Export failed: ${e instanceof Error ? e.message : 'Try again.'}`)
     }
   }
 
