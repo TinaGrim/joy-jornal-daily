@@ -227,6 +227,7 @@ interface JournalContextType {
   syncLatency: number
   syncPeakLatency: number
   exportBackup: () => Promise<void>
+  restoreBackup: (backup: { pages: Page[]; metadata: JournalMetadata }) => void
 }
 
 const JournalContext = createContext<JournalContextType | undefined>(undefined)
@@ -1263,6 +1264,44 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     toast.success('Backup downloaded!')
   }, [anniversaryDate, milestones, occasions, journeyDetails, sync.getHistory, sync.loadCheckpoint])
 
+  // Restore the journal from an exported backup (the JSON produced by
+  // exportBackup). The restored pages become the authoritative book for the
+  // current session — for a google session that means local journal_pages AND
+  // the cloud slot. publishRestored stamps every element with a fresh
+  // timestamp and tombstones anything currently live that isn't in the backup,
+  // so the subsequent cloud merge cannot resurrect old/other content on top of
+  // the restored book. Metadata is replaced and persisted the same way.
+  const restoreBackup = useCallback((backup: { pages: Page[]; metadata: JournalMetadata }) => {
+    if (!Array.isArray(backup?.pages) || !backup?.metadata) {
+      toast.error('Invalid backup file.')
+      return
+    }
+    const restored = deduplicatePageElements(sanitizePages(backup.pages))
+    if (restored.length === 0) {
+      toast.error('Backup contains no pages.')
+      return
+    }
+    const meta = backup.metadata
+    setAnniversaryDate(meta.anniversaryDate ?? getDefaultMetadata().anniversaryDate)
+    setMilestones(meta.milestones ?? getDefaultMetadata().milestones)
+    setOccasions(meta.occasions ?? getDefaultMetadata().occasions)
+    setJourneyDetails(meta.journeyDetails ?? getDefaultMetadata().journeyDetails)
+    const persisted: JournalMetadata = {
+      anniversaryDate: meta.anniversaryDate ?? getDefaultMetadata().anniversaryDate,
+      milestones: meta.milestones ?? getDefaultMetadata().milestones,
+      occasions: meta.occasions ?? getDefaultMetadata().occasions,
+      journeyDetails: meta.journeyDetails ?? getDefaultMetadata().journeyDetails,
+    }
+    if (isDemoRef.current || !liveStateBelongsToRealJournal(liveJournalSourceRef.current)) {
+      setDemoMetadata(persisted)
+    } else {
+      saveMetadataToStorage(persisted)
+      sync.saveMetadata(persisted)
+    }
+    publishRestored(restored)
+    toast.success('Book restored from backup.')
+  }, [sync, publishRestored])
+
   return (
     <JournalContext.Provider
       value={{
@@ -1289,7 +1328,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         canUndo: undoDepth > 0,
         canRedo: redoDepth > 0,
         saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints,
-        exportBackup,
+        exportBackup, restoreBackup,
       }}
     >
       {children}

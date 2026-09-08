@@ -1,6 +1,9 @@
-import { Download, Database } from 'lucide-react'
+import { useRef } from 'react'
+import { Download, Database, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { useJournal } from '../contexts/JournalContext'
+import type { Page } from '@/types/journal'
+import type { JournalMetadata } from '@/lib/syncTypes'
 
 function prepareClone(doc: Document) {
   doc.querySelectorAll('svg').forEach((svg) => {
@@ -55,7 +58,35 @@ function stitchPages(canvases: HTMLCanvasElement[]) {
 }
 
 export default function ExportButton() {
-  const { exportBackup } = useJournal()
+  const { exportBackup, restoreBackup } = useJournal()
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handleRestoreFile = (file: File | null) => {
+    const input = fileInputRef.current
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      let backup: unknown
+      try {
+        backup = JSON.parse(String(reader.result))
+      } catch {
+        toast.error('Invalid backup file — not valid JSON.')
+        return
+      }
+      const pages = (backup as { pages?: unknown })?.pages
+      const metadata = (backup as { metadata?: unknown })?.metadata
+      if (!Array.isArray(pages) || !metadata) {
+        toast.error('Invalid backup file — missing pages or metadata.')
+        return
+      }
+      if (!window.confirm('Replace the current book with this backup? This overwrites the local and cloud copies.')) {
+        return
+      }
+      restoreBackup({ pages: pages as Page[], metadata: metadata as JournalMetadata })
+    }
+    reader.readAsText(file)
+    if (input) input.value = ''
+  }
 
   const handleExport = async (format: 'png' | 'pdf') => {
     const book = document.querySelector('[data-book]')
@@ -96,6 +127,13 @@ export default function ExportButton() {
 
   return (
     <div className="relative">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(e) => handleRestoreFile(e.target.files?.[0] ?? null)}
+      />
       <div className="group inline-block">
         <button
           className="p-1.5 rounded-lg bg-white border border-[#e8dcc8] text-[#8b7355] hover:border-[#d97757] hover:text-[#d97757] transition-colors cursor-pointer"
@@ -124,6 +162,13 @@ export default function ExportButton() {
             >
               <Database className="w-3 h-3 text-[#8b7355]" />
               Download Backup
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#2c3e50] hover:bg-[#e5d5b8] text-left cursor-pointer whitespace-nowrap"
+            >
+              <Upload className="w-3 h-3 text-[#8b7355]" />
+              Restore from Backup
             </button>
           </div>
         </div>
