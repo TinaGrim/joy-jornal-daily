@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mergePageSnapshots, collapseVisualDuplicates, visualStackKey } from '../src/lib/mergePages.ts'
+import { mergePageSnapshots, collapseVisualDuplicates, visualStackKey, ensureUniquePageIds, tombstoneExtrasForRestore } from '../src/lib/mergePages.ts'
 
 const NOW = 1_700_000_000_000 // realistic modern timestamp base
 
@@ -111,4 +111,55 @@ test('visualStackKey covers stickers, emoji and empty text; rejects others', () 
   assert.equal(visualStackKey(element({ type: 'text', data: { text: '' } })).startsWith('text|'), true)
   assert.equal(visualStackKey(element({ type: 'image', data: { src: 'x' } })), null)
   assert.equal(visualStackKey(element({ type: 'shape', data: { fill: '#f00' } })), null)
+})
+
+test('duplicate page ids are renumbered, first occurrence keeps the id', () => {
+  const a = { ...PAGE, id: 'page-4', elements: [element({ id: 'x' })] }
+  const b = { ...PAGE, id: 'page-4', elements: [element({ id: 'y' })] }
+  const c = { ...PAGE, id: 'page-5', elements: [] }
+  const out = ensureUniquePageIds([a, b, c])
+  assert.deepEqual(out.map(p => p.id), ['page-4', 'page-4-2', 'page-5'])
+  assert.ok(out[0].elements[0].id === 'x' && out[1].elements[0].id === 'y')
+})
+
+test('duplicate page ids are renumbered deterministically across runs', () => {
+  const pages = [0, 1, 2].map(i => ({ ...PAGE, id: 'dup', elements: [] }))
+  const a = ensureUniquePageIds(pages)
+  const b = ensureUniquePageIds(pages)
+  assert.deepEqual(a.map(p => p.id), b.map(p => p.id))
+  assert.deepEqual(a.map(p => p.id), ['dup', 'dup-2', 'dup-3'])
+})
+
+test('restore tombstone guard: other-slot orphan ids become tombstones', () => {
+  const restored = [{ ...PAGE, id: 'page-4', elements: [element({ id: 'kept', data: { _updatedAt: NOW + 0 } })] }]
+  const cloud = [
+    { ...PAGE, id: 'page-4', elements: [
+      element({ id: 'kept', data: { _updatedAt: NOW } }),
+      element({ id: 'stale-dup', type: 'sticker', x: 100, y: 100, data: { src: '🎀', _updatedAt: NOW - 5000 } }),
+      element({ id: 'ghost', type: 'text', data: { _deleted: true, _updatedAt: NOW } }),
+    ] },
+    { ...PAGE, id: 'extra-page', elements: [element({ id: 'real-new', data: { _updatedAt: NOW } })] },
+  ]
+  const out = tombstoneExtrasForRestore(restored, cloud, NOW + 100)
+  const els = out[0].elements
+  assert.equal(els.length, 2) // kept + stale-dup tombstone; ghost was already deleted
+  assert.equal(els[0].id, 'kept')
+  assert.equal(els[0].data._deleted, undefined)
+  assert.equal(els[1].id, 'stale-dup')
+  assert.equal(els[1].data._deleted, true)
+  assert.equal(els[1].data._updatedAt, NOW + 100)
+})
+
+test('restore tombstone guard: merging the tombstone back kills the stale slot copy', () => {
+  const restored = [{ ...PAGE, elements: [element({ id: 'kept', data: { _updatedAt: NOW + 100 } })] }]
+  const cloudRaw = [{ ...PAGE, elements: [element({ id: 'kept', data: { _updatedAt: NOW + 100 } }), element({ id: 'stale-dup', type: 'text', data: { text: 'dup', _updatedAt: NOW - 5000 } })] }]
+  const withTombstones = tombstoneExtrasForRestore(restored, cloudRaw, NOW + 100)
+  // another device still holds the stale live copy
+  const staleSlot = [{ ...PAGE, elements: [element({ id: 'kept', data: { _updatedAt: NOW + 100 } }), element({ id: 'stale-dup', type: 'text', data: { text: 'dup', _updatedAt: NOW - 5000 } })] }]
+  const merged = mergePageSnapshots([
+    { deviceId: 'cloud', updatedAt: 0, pages: withTombstones },
+    { deviceId: 'stale-device', updatedAt: 0, pages: staleSlot },
+  ])
+  const ids = merged[0].elements.filter(e => !e.data?._deleted).map(e => e.id)
+  assert.deepEqual(ids, ['kept']) // stale-dup does not resurrect
 })

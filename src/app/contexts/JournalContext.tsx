@@ -4,7 +4,7 @@ import confetti from 'canvas-confetti'
 import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, JourneyDetails, PagePattern } from '@/types/journal'
 import type { JournalMetadata } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
-import { mergePageSnapshots, collapseVisualDuplicates } from '@/lib/mergePages'
+import { mergePageSnapshots, collapseVisualDuplicates, ensureUniquePageIds, tombstoneExtrasForRestore } from '@/lib/mergePages'
 import { journalNow } from '@/lib/journalClock'
 import { useFirebaseAuth, friendlyAuthError } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
@@ -51,7 +51,7 @@ function deduplicatePageElements(pages: Page[]): Page[] {
     const v = el.data?._updatedAt
     return typeof v === 'number' ? v : 0
   }
-  return pages.map(page => {
+  return ensureUniquePageIds(pages).map(page => {
     const byId = new Map<string, CanvasElement>()
     for (const el of page.elements ?? []) {
       const prev = byId.get(el.id)
@@ -775,7 +775,18 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         .map(el => ({ ...el, data: { ...el.data, _deleted: true, _updatedAt: now } }))
       return { ...p, elements: [...p.elements, ...extras] }
     })
-    const next = sanitizePages(withExtras)
+    // Tombstone the cloud aggregate's orphan copies too: without this, the
+    // cloud merge re-unites stale duplicate elements (ids absent from the
+    // restored book) from other device slots onto the restored pages — the
+    // restore looks "clean for a second" and the mess comes back. Fresh
+    // tombstones stamped `now` beat those older copies per id on the next
+    // merge, so the restored book stays clean.
+    const tombstoned = tombstoneExtrasForRestore(
+      withExtras,
+      deduplicatePageElements(sanitizePages(sync.pages)),
+      now,
+    )
+    const next = sanitizePages(tombstoned)
     setPages(next)
     if (isDemo) {
       setDemoPages(next)

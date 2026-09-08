@@ -99,6 +99,46 @@ export function collapseVisualDuplicates(elements: CanvasElement[]): CanvasEleme
 }
 
 /**
+ * Makes every page id unique. A page list can accumulate two distinct real
+ * pages that share one id (e.g. the id sequence was reused before). Merging
+ * those into one page would destroy one of them, and rendering both leaves
+ * repeated "Pg X–Y" labels, so every duplicate is renumbered deterministically
+ * (`page-4` → `page-4-2`). Index-based — positions are untouched, only the
+ * cosmetic page label changes.
+ */
+export function ensureUniquePageIds(pages: Page[]): Page[] {
+  const seen = new Map<string, number>()
+  return pages.map(p => {
+    const n = (seen.get(p.id) ?? 0) + 1
+    seen.set(p.id, n)
+    if (n === 1) return p
+    return { ...p, id: `${p.id}-${n}` }
+  })
+}
+
+/**
+ * Guards a restore/undo publish against resurrection from OTHER device slots.
+ * Every live element in `other` for a page whose element id is absent from
+ * the `restored` page is rewritten as a fresh tombstone. Publishing that back
+ * to the origin's own cloud slot means the next cross-slot merge — which picks
+ * the newest `_updatedAt` per id — kills the stale duplicate copies instead of
+ * re-uniting them onto the restored book. Indexes beyond the restored book
+ * (real additions from another device) are left untouched.
+ */
+export function tombstoneExtrasForRestore(restored: Page[], other: Page[], now: number): Page[] {
+  return restored.map((p, i) => {
+    const kept = p.elements ?? []
+    const keptIds = new Set<string>()
+    for (const el of kept) keptIds.add(el.id)
+    const orphans = (other[i]?.elements ?? [])
+      .filter(el => !el.data?._deleted && !keptIds.has(el.id))
+      .map(el => ({ ...el, data: { ...el.data, _deleted: true, _updatedAt: now } }))
+    if (orphans.length === 0) return p
+    return { ...p, elements: [...kept, ...orphans] }
+  })
+}
+
+/**
  * Merges per-device page snapshots into one canonical state.
  * Per element id the copy with the newest `_updatedAt` wins; deleted
  * elements are tombstones (`data._deleted`) so they never resurrect from
