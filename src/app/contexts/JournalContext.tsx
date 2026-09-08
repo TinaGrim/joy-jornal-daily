@@ -4,7 +4,7 @@ import confetti from 'canvas-confetti'
 import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, JourneyDetails, PagePattern } from '@/types/journal'
 import type { JournalMetadata } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
-import { mergePageSnapshots } from '@/lib/mergePages'
+import { mergePageSnapshots, collapseVisualDuplicates } from '@/lib/mergePages'
 import { journalNow } from '@/lib/journalClock'
 import { useFirebaseAuth, friendlyAuthError } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
@@ -57,7 +57,11 @@ function deduplicatePageElements(pages: Page[]): Page[] {
       const prev = byId.get(el.id)
       if (!prev || ts(el) > ts(prev)) byId.set(el.id, el)
     }
-    return { ...page, elements: [...byId.values()] }
+    // Collapse stacked/duplicated copies of the same visual (photos with the
+    // same src, identical text/sticker/emoji on the same cell) with the same
+    // rules the cloud merge uses, so duplicates accumulated in local storage
+    // heal on the next publish, edit or restore.
+    return { ...page, elements: collapseVisualDuplicates([...byId.values()]) }
   })
 }
 
@@ -418,9 +422,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   }, [isDemo, setBookClosedState, fbSignOut])
 
   const [pages, setPages] = useState<Page[]>(() => {
-    if (session === 'demo') return getDemoPages()
+    // Collapse duplicate visuals (photos with the same src, identical
+    // text/sticker/emoji stacked on the same cell) on load, so a book that
+    // accumulated piles of duplicates from the old mix/merge history renders
+    // cleaned up immediately — for the demo resume path (enterDemoMode is not
+    // called on auto-resume) and the real session alike.
+    if (session === 'demo') return deduplicatePageElements(sanitizePages(getDemoPages()))
     const stored = loadPagesFromStorage()
-    return stored ?? getDefaultPages()
+    return stored ? deduplicatePageElements(sanitizePages(stored)) : getDefaultPages()
   })
 
   const pagesRef = useRef(pages)

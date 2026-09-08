@@ -269,6 +269,43 @@ await scenario(browser, 'FR-013 demo interaction parity smoke', async (b) => {
   } finally { await ctx.close() }
 })
 
+// SC-010 — Duplicate-collapse heal: a messy visual stack in stored pages is
+// collapsed to one per visual on load (same collapse the cloud merge uses).
+const MESSY_PAGES = [
+  { id: 'cover', background: '#f0e6d3', pattern: 'blank', elements: [] },
+  {
+    id: 'page-1', background: '#f0e6d3', pattern: 'grid', gridSize: 40,
+    elements: [
+      { id: 'stk-1', type: 'sticker', x: 120, y: 90, width: 100, height: 100, rotation: 0, zIndex: 1, data: { src: '🎀', label: 'Heart', _updatedAt: 100 } },
+      { id: 'stk-2', type: 'sticker', x: 121, y: 92, width: 100, height: 100, rotation: 0, zIndex: 1, data: { src: '🎀', label: 'Heart', _updatedAt: 200 } },
+      { id: 'txt-1', type: 'text', x: 300, y: 200, width: 200, height: 50, rotation: 0, zIndex: 1, data: { text: '', font: 'Caveat', fontSize: 24, color: '#2c3e50', textAlign: 'left', _updatedAt: 100 } },
+      { id: 'txt-2', type: 'text', x: 301, y: 201, width: 200, height: 50, rotation: 0, zIndex: 1, data: { text: '', font: 'Caveat', fontSize: 24, color: '#2c3e50', textAlign: 'left', _updatedAt: 300 } },
+      { id: 'lone', type: 'sticker', x: 500, y: 400, width: 100, height: 100, rotation: 0, zIndex: 1, data: { src: '🌸', _updatedAt: 150 } },
+    ],
+  },
+  { id: 'page-2', background: '#f0e6d3', pattern: 'grid', gridSize: 40, elements: [] },
+]
+const MESSY_SEED = { 'demo:uid': 'demo', 'demo:pages': JSON.stringify(MESSY_PAGES) }
+
+await scenario(browser, 'SC-010 stacked duplicates collapse to one visual on load', async (b) => {
+  const { ctx, page } = await newPage(b, { seeds: MESSY_SEED })
+  try {
+    await page.getByText(/Pg\s+\d/).waitFor({ timeout: 10000 })
+    await page.waitForTimeout(600)
+    const rendered = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-elem-id]')).map(el => el.getAttribute('data-elem-id'))
+    )
+    assert(rendered.length === 3, `messy stack collapsed to 3 rendered visuals (got ${rendered.length}: ${rendered.join(', ')})`)
+    assert(rendered.includes('stk-2'), 'newest sticker copy rendered')
+    assert(!rendered.includes('stk-1'), 'older sticker duplicate not rendered')
+    assert(rendered.includes('txt-2'), 'newest empty-text placeholder rendered')
+    assert(!rendered.includes('txt-1'), 'older empty-text placeholder not rendered')
+    assert(rendered.includes('lone'), 'non-duplicate sticker rendered')
+    assert(page.__pageErrors.length === 0, `no page errors (${page.__pageErrors.join('; ')})`)
+    record('SC-010 stacked duplicates collapse to one visual on load', true)
+  } finally { await ctx.close() }
+})
+
 await teardown()
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} scenarios passed`)

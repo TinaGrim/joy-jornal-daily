@@ -1,4 +1,4 @@
-import type { Page, CanvasElement } from '@/types/journal'
+import type { Page, CanvasElement } from '../types/journal.ts'
 
 export interface PageSnapshot {
   pages: Page[]
@@ -19,6 +19,83 @@ function pageTimestamp(page: Page): number {
     max = Math.max(max, elementTimestamp(el))
   }
   return max
+}
+
+/**
+ * Identity of a piece of visual content for collapse purposes: text boxes
+ * (including invisible empty placeholders), stickers and emoji are the same
+ * visual when their rendered content and style land on the same cell.
+ * Position is quantized to a 4px grid so near-identical stacks (e.g. from
+ * tap-to-insert or a merge of divergent device slots) collapse together while
+ * elements placed on genuinely different spots never match.
+ */
+export function visualStackKey(el: CanvasElement): string | null {
+  const rx = Math.round((el.x ?? 0) / 4)
+  const ry = Math.round((el.y ?? 0) / 4)
+  if (el.type === 'text') {
+    const txt = el.data?.text
+    if (typeof txt !== 'string') return null
+    return ['text', txt, el.data.font ?? '', el.data.fontSize ?? '', el.data.color ?? '', rx, ry].join('|')
+  }
+  if (el.type === 'sticker') {
+    const src = el.data?.src
+    if (typeof src !== 'string' || src === '') return null
+    return ['sticker', src, rx, ry].join('|')
+  }
+  if (el.type === 'emoji') {
+    const emoji = el.data?.emoji
+    if (typeof emoji !== 'string' || emoji === '') return null
+    return ['emoji', emoji, rx, ry].join('|')
+  }
+  return null
+}
+
+function shouldReplace(existing: CanvasElement, el: CanvasElement): boolean {
+  const existingDeleted = !!existing.data?._deleted
+  const elDeleted = !!el.data?._deleted
+  // A live copy always beats a tombstone: deleting one duplicate copy must
+  // not delete the visual. Among live copies the newest `_updatedAt` wins.
+  if (!elDeleted && existingDeleted) return true
+  if (!elDeleted && !existingDeleted && elementTimestamp(el) > elementTimestamp(existing)) return true
+  return false
+}
+
+/**
+ * Removes duplicate copies of the same visual content within ONE page:
+ * - images: one per unique `src` (the same photo re-uploaded by divergent
+ *   device slots lands under different element ids);
+ * - text / stickers / emoji: one per `visualStackKey` (same content + style
+ *   on the same cell). Empty text placeholders are included — piles of
+ *   identical invisible boxes block every tap underneath.
+ * Tombstoned duplicates are removed when a live copy exists.
+ */
+export function collapseVisualDuplicates(elements: CanvasElement[]): CanvasElement[] {
+  const out: CanvasElement[] = []
+  const srcSeen = new Map<string, CanvasElement>()
+  const stackSeen = new Map<string, CanvasElement>()
+  for (const el of elements) {
+    const src = el.type === 'image' && typeof el.data?.src === 'string' ? el.data.src : null
+    if (src !== null && srcSeen.has(src)) {
+      if (shouldReplace(srcSeen.get(src)!, el)) {
+        out[out.indexOf(srcSeen.get(src)!)] = el
+        srcSeen.set(src, el)
+      }
+      continue
+    }
+    if (src !== null) srcSeen.set(src, el)
+
+    const key = visualStackKey(el)
+    if (key !== null && stackSeen.has(key)) {
+      if (shouldReplace(stackSeen.get(key)!, el)) {
+        out[out.indexOf(stackSeen.get(key)!)] = el
+        stackSeen.set(key, el)
+      }
+      continue
+    }
+    if (key !== null) stackSeen.set(key, el)
+    out.push(el)
+  }
+  return out
 }
 
 /**
@@ -67,62 +144,13 @@ export function mergePageSnapshots(slots: PageSnapshot[]): Page[] {
       .filter(el => !(el.data?._deleted && now - elementTimestamp(el) > TOMBSTONE_RETENTION_MS))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
 
-    // Collapse duplicate photos: the same image `src` is the same photo even
-    // when divergent device copies re-uploaded it under a different element
-    // id. Prefer a live copy over a tombstone (deleting one duplicate copy
-    // must not delete the photo); among live copies the newest wins.
-    const srcSeen = new Map<string, CanvasElement>()
-    const unique: CanvasElement[] = []
-    for (const el of elements) {
-      const src = el.type === 'image' ? el.data?.src : null
-      if (typeof src === 'string' && srcSeen.has(src)) {
-        const existing = srcSeen.get(src)!
-        const elDeleted = !!el.data?._deleted
-        const existingDeleted = !!existing.data?._deleted
-        const replace = (!elDeleted && existingDeleted)
-          || (!elDeleted && !existingDeleted && elementTimestamp(el) > elementTimestamp(existing))
-        if (replace) {
-          unique[unique.indexOf(existing)] = el
-          srcSeen.set(src, el)
-        }
-        continue
-      }
-      if (typeof src === 'string') srcSeen.set(src, el)
-      unique.push(el)
-    }
+    // Collapse duplicate copies of the same visual (photo/text/sticker/emoji)
+    // so merging divergent device slots never stacks identical content on a
+    // spot. Deterministic across devices: the element order is id-sorted and
+    // the collapse is keyed/order-stable.
+    const collapsed = collapseVisualDuplicates(elements)
 
-    // Collapse stacked identical text boxes: repeated tap-to-insert (before
-    // any edit renamed them) produced piles of identical invisible
-    // placeholders on one spot across device slots, which blocked all taps
-    // underneath ("cannot select element"). Identical text + font + size +
-    // color within a few pixels = same insert duplicated; keep the newest.
-    const stackSeen = new Map<string, CanvasElement>()
-    const dedupedStacks: CanvasElement[] = []
-    for (const el of unique) {
-      let stackKey: string | null = null
-      if (el.type === 'text') {
-        const txt = typeof el.data?.text === 'string' ? el.data.text : ''
-        if (txt.trim() !== '') {
-          stackKey = [
-            el.data.text,
-            el.data.font ?? '', el.data.fontSize ?? '', el.data.color ?? '',
-            Math.round((el.x ?? 0) / 4), Math.round((el.y ?? 0) / 4),
-          ].join('|')
-        }
-      }
-      if (stackKey !== null && stackSeen.has(stackKey)) {
-        const existing = stackSeen.get(stackKey)!
-        if (elementTimestamp(el) > elementTimestamp(existing)) {
-          dedupedStacks[dedupedStacks.indexOf(existing)] = el
-          stackSeen.set(stackKey, el)
-        }
-        continue
-      }
-      if (stackKey !== null) stackSeen.set(stackKey, el)
-      dedupedStacks.push(el)
-    }
-
-    merged.push({ ...newestPage, elements: dedupedStacks })
+    merged.push({ ...newestPage, elements: collapsed })
   }
 
   return merged
