@@ -58,11 +58,11 @@ export default function AuthScreen() {
             disabled={authLoading}
             className={`w-full px-6 py-2.5 border rounded-xl transition-all disabled:opacity-50 cursor-pointer font-handwriting text-sm ${isDark ? 'border-[#45475a] text-[#a6adc8] hover:border-sage hover:text-sage' : 'border-border-light text-warm-brown hover:border-sage hover:text-sage'}`}
           >
-            Continue without account
+            Try the demo journey
           </button>
 
           <p className={`mt-6 text-xs text-center font-handwriting ${isDark ? 'text-[#6c7086]' : 'text-text-muted'}`}>
-            Your journal is private and secure.
+            The demo keeps your work on this device until you sign in.
           </p>
         </div>
       </div>

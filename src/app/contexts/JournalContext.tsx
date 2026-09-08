@@ -2,12 +2,31 @@ import { createContext, useContext, useState, useRef, useEffect, type ReactNode,
 import { toast } from 'sonner'
 import confetti from 'canvas-confetti'
 import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, JourneyDetails, PagePattern } from '@/types/journal'
-import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
+import type { JournalMetadata } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
 import { mergePageSnapshots } from '@/lib/mergePages'
 import { journalNow } from '@/lib/journalClock'
 import { useFirebaseAuth, friendlyAuthError } from '@/hooks/useFirebaseAuth'
 import { useWebRTCSync } from '@/hooks/useWebRTCSync'
+import {
+  getDemoUid,
+  getDemoPages,
+  setDemoPages,
+  getDemoMetadata,
+  setDemoMetadata,
+  getDemoBookClosed,
+  setDemoBookClosed,
+  purgeLegacyMigratedDemo,
+  hasDemoState,
+  getDemoPagesSeed,
+  getDemoMetadataSeed,
+  setAdoptionIntent,
+  clearAdoptionIntent,
+  getAdoptionIntent,
+  hasAdoptedAccount,
+  addAdoptedAccountId,
+} from '@/lib/demoStorage'
+import { computeDemoToGoogleRebase } from '@/lib/journalTransition'
 
 const BACKUP_VERSION = 1
 
@@ -185,6 +204,7 @@ interface JournalContextType {
   rightPanelWidth: number
   setRightPanelWidth: (width: number) => void
   isAuthenticated: boolean
+  isDemo: boolean
   authLoading: boolean
   authError: string | null
   cloudLoading: boolean
@@ -221,13 +241,39 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   } = useFirebaseAuth()
 
   const [localAuthError, setLocalAuthError] = useState<string | null>(null)
-  const [localUser, setLocalUser] = useState<{ uid: string; displayName: string } | null>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY_UID)
-    return stored ? { uid: stored, displayName: 'You' } : null
+
+  // Three-state session: 'google' (firebase-authed), 'demo' (isolated local
+  // demo journey), or null (signed out / fresh visitor). A fresh visitor sees
+  // AuthScreen; demo requires no firebase account and never touches the real
+  // cloud journal.
+  const [session, setSession] = useState<'google' | 'demo' | null>(() => {
+    // Drop any pre-demo migrated copy of the real journal before it can be
+    // rendered: an anonymous visitor must never see authenticated content.
+    purgeLegacyMigratedDemo()
+    if (fbAuthenticated) return 'google'
+    if (hasDemoState()) return 'demo'
+    return null
   })
 
-  const effectiveUser = firebaseUser ?? localUser
-  const isAuthenticated = fbAuthenticated || !!localUser
+  // A returning firebase user always wins at startup (and stays google while
+  // authenticated); it is never downgraded to demo.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- auth resolution is async; session must be aligned once Firebase reports in
+    if (fbAuthenticated) setSession('google')
+  }, [fbAuthenticated])
+
+  const isDemo = session === 'demo'
+  const isDemoRef = useRef(isDemo)
+  useEffect(() => { isDemoRef.current = isDemo }, [isDemo])
+  const isGoogle = session === 'google'
+  // A usable session: the book is editable in both google and demo modes.
+  const isAuthenticated = session !== null
+
+  const effectiveUser = fbAuthenticated
+    ? firebaseUser
+    : isDemo
+      ? { uid: getDemoUid(), displayName: 'Demo' }
+      : null
 
   // Click-time failures land in localAuthError; redirect-completion failures
   // (which happen after returning from accounts.google.com, long after any
@@ -237,39 +283,33 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = useCallback(async () => {
     try {
       setLocalAuthError(null)
+      // FR-011: a demo visitor who starts sign-in marks adoption intent so the
+      // adoption survives a full-page redirect round trip while Firebase
+      // completes auth.
+      if (isDemo) setAdoptionIntent()
       await fbSignIn()
+      // A successfully completed popup flips the session to 'google' within a
+      // frame. If the promise resolved but the visitor is STILL in the demo
+      // shortly after, the attempt was cancelled or the redirect flow is in
+      // flight — keep them in the demo and confirm their work is safe.
+      window.setTimeout(() => {
+        if (isDemoRef.current) {
+          toast.info('Sign-in didn\'t complete — your demo journal stays on this device.')
+        }
+      }, 400)
     } catch (err) {
       setLocalAuthError(friendlyAuthError(err))
+      if (isDemo) toast.error(friendlyAuthError(err))
     }
-  }, [fbSignIn])
+  }, [fbSignIn, isDemo])
 
-  // Guest session uses a local uid. The Anonymous provider is disabled
-  // server-side anyway (ADMIN_ONLY_OPERATION); real signInAnonymously would
-  // also require enabling it in Firebase Console. Revisit only together with
-  // console changes and testing on real devices.
-  const signInAnonymously = useCallback(() => {
-    let uid = localStorage.getItem(STORAGE_KEY_UID)
-    if (!uid) {
-      uid = `anon-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-      localStorage.setItem(STORAGE_KEY_UID, uid)
-    }
-    setLocalUser({ uid, displayName: 'You' })
-  }, [])
-
-  const signOut = useCallback(async () => {
-    try {
-      setLocalUser(null)
-      localStorage.removeItem(STORAGE_KEY_UID)
-      await fbSignOut()
-    } catch (err) {
-      console.error('[JournalContext] signOut failed:', err)
-    }
-  }, [fbSignOut])
-
-  const sync = useWebRTCSync(isAuthenticated, useCallback((msg: string) => {
+  // Real cloud sync only ever runs for the google session. The demo session
+  // must never construct or enable FirebaseSync (it would write the shared
+  // cloud journal); when gated off, useWebRTCSync returns a quiescent object.
+  const sync = useWebRTCSync(isGoogle, useCallback((msg: string) => {
     toast.error(msg, { duration: 5000 })
   }, []))
-  const syncLoading = isAuthenticated && fbAuthenticated && sync.loading
+  const syncLoading = isGoogle && fbAuthenticated && sync.loading
   const syncLatency = sync.lastLatency
   const syncPeakLatency = sync.peakLatency
 
@@ -325,26 +365,52 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const cursors = remoteCursors
   const updateCursorPosition = useCallback(
     (x: number, y: number, page: number) => {
+      if (isDemo) return
       saveUserCursor(effectiveUser?.uid ?? 'local', currentUser.name, currentUser.color, x, y, page)
     },
-    [saveUserCursor, currentUser.name, currentUser.color, effectiveUser?.uid],
+    [saveUserCursor, currentUser.name, currentUser.color, effectiveUser?.uid, isDemo],
   )
 
   // Book starts OPEN by default: landing on a static closed cover made
   // people tap their elements with no response ("cannot select element").
-  // The last chosen state is remembered per device.
+  // The last chosen state is remembered per device (demo keeps its own
+  // demo-scoped preference and never reads journal_book_closed).
   const initialBookClosed = (() => {
+    if (session === 'demo') return getDemoBookClosed()
     try { return localStorage.getItem('journal_book_closed') === '1' } catch { return false }
   })()
   const [bookClosed, setBookClosedState] = useState<boolean>(initialBookClosed)
   const setBookClosed = useCallback((closed: boolean) => {
     setBookClosedState(closed)
+    if (isDemo) {
+      setDemoBookClosed(closed)
+      return
+    }
     try { localStorage.setItem('journal_book_closed', closed ? '1' : '0') } catch { /* storage unavailable */ }
-  }, [])
+  }, [isDemo, setBookClosedState])
+
+  const signOut = useCallback(async () => {
+    try {
+      if (isDemo) {
+        // Leaving demo returns to the signed-out gate but KEEPS demo records,
+        // so re-entering demo restores the same state. A pending adoption
+        // intent is discarded: leaving the demo abandons the conversion.
+        clearAdoptionIntent()
+        setBookClosedState(false)
+        setSession(null)
+        return
+      }
+      setSession(null)
+      localStorage.removeItem(STORAGE_KEY_UID)
+      await fbSignOut()
+    } catch (err) {
+      console.error('[JournalContext] signOut failed:', err)
+    }
+  }, [isDemo, setBookClosedState, fbSignOut])
 
   const [pages, setPages] = useState<Page[]>(() => {
+    if (session === 'demo') return getDemoPages()
     const stored = loadPagesFromStorage()
-    console.log('[JournalContext] useState init, stored pages:', stored?.length, stored?.[1]?.elements?.length)
     return stored ?? getDefaultPages()
   })
 
@@ -354,8 +420,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const initializedRef = useRef(false)
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      console.log('[JournalContext] init skip: not authenticated 2')
+    if (!isGoogle) {
       return
     }
     if (initializedRef.current) {
@@ -393,6 +458,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!initializedRef.current) return
+    if (isDemo) return
     if (sync.pages.length === 0) return
     const incoming = deduplicatePageElements(sanitizePages(sync.pages))
     const local = deduplicatePageElements(sanitizePages(pagesRef.current))
@@ -414,14 +480,26 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!isDefaultTemplate(local)) {
       sync.savePages(merged)
     }
-  }, [sync.pages, sync.savePages])
+  }, [sync.pages, sync.savePages, isDemo])
 
-  const hadLocalMetadataRef = useRef(!!loadMetadataFromStorage())
+  const hadLocalMetadataRef = useRef(session === 'demo' ? false : !!loadMetadataFromStorage())
 
-  const [anniversaryDate, setAnniversaryDate] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).anniversaryDate ?? getDefaultMetadata().anniversaryDate)
-  const [milestones, setMilestones] = useState<Milestone[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).milestones ?? getDefaultMetadata().milestones)
-  const [occasions, setOccasions] = useState<Occasion[]>(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).occasions ?? getDefaultMetadata().occasions)
-  const [journeyDetails, setJourneyDetails] = useState(() => (loadMetadataFromStorage() ?? getDefaultMetadata()).journeyDetails ?? getDefaultMetadata().journeyDetails)
+  const [anniversaryDate, setAnniversaryDate] = useState(() => {
+    const src = session === 'demo' ? getDemoMetadata() : (loadMetadataFromStorage() ?? getDefaultMetadata())
+    return src.anniversaryDate ?? getDefaultMetadata().anniversaryDate
+  })
+  const [milestones, setMilestones] = useState<Milestone[]>(() => {
+    const src = session === 'demo' ? getDemoMetadata() : (loadMetadataFromStorage() ?? getDefaultMetadata())
+    return src.milestones ?? getDefaultMetadata().milestones
+  })
+  const [occasions, setOccasions] = useState<Occasion[]>(() => {
+    const src = session === 'demo' ? getDemoMetadata() : (loadMetadataFromStorage() ?? getDefaultMetadata())
+    return src.occasions ?? getDefaultMetadata().occasions
+  })
+  const [journeyDetails, setJourneyDetails] = useState(() => {
+    const src = session === 'demo' ? getDemoMetadata() : (loadMetadataFromStorage() ?? getDefaultMetadata())
+    return src.journeyDetails ?? getDefaultMetadata().journeyDetails
+  })
 
   const metadataChannelRef = useRef<BroadcastChannel | null>(null)
   const metadataReceiveRef = useRef(false)
@@ -429,6 +507,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const deviceIdRef = useRef(`meta-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
 
   useEffect(() => {
+    // The demo session is per-tab and fully isolated: it must never join the
+    // shared 'journal-metadata' BroadcastChannel (which carries the real
+    // journal's metadata between tabs).
+    if (isDemo) return
     const channel = new BroadcastChannel('journal-metadata')
     metadataChannelRef.current = channel
     channel.onmessage = (e) => {
@@ -444,7 +526,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       saveMetadataToStorage(meta)
     }
     return () => channel.close()
-  }, [])
+  }, [isDemo])
 
   // Broadcast metadata changes (skip cross-tab broadcast if just received from another source)
   const metaPrevRef = useRef<string>('')
@@ -455,6 +537,12 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     const key = JSON.stringify(meta)
     if (key === metaPrevRef.current) return
     metaPrevRef.current = key
+    if (isDemo) {
+      // Demo metadata lives ONLY in demo-scoped storage; it must never reach
+      // journal_metadata, Firebase, or the shared metadata BroadcastChannel.
+      setDemoMetadata(meta)
+      return
+    }
     // Always persist to localStorage and Firebase
     saveMetadataToStorage(meta)
     syncSaveMetadataRef.current(meta)
@@ -465,10 +553,11 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       return
     }
     metadataChannelRef.current?.postMessage({ ...meta, _senderId: deviceIdRef.current })
-  }, [anniversaryDate, milestones, occasions, journeyDetails])
+  }, [anniversaryDate, milestones, occasions, journeyDetails, isDemo])
 
   // Apply incoming metadata from Firebase (other users)
   useEffect(() => {
+    if (isDemo) return
     if (!sync.metadata) return
     const current: JournalMetadata = { anniversaryDate, milestones, occasions, journeyDetails }
     if (JSON.stringify(current) === JSON.stringify(sync.metadata)) return
@@ -480,7 +569,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     setOccasions(sync.metadata.occasions ?? getDefaultMetadata().occasions)
     setJourneyDetails(sync.metadata.journeyDetails ?? getDefaultMetadata().journeyDetails)
     saveMetadataToStorage(sync.metadata)
-  }, [sync.metadata])
+  }, [sync.metadata, isDemo])
 
   // When the book boots already-open, land on the first content spread
   // (indices 1–2, i.e. "Pg 1–2") exactly like tapping the open button does,
@@ -536,6 +625,58 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const [undoDepth, setUndoDepth] = useState(0)
   const [redoDepth, setRedoDepth] = useState(0)
 
+  // Track the prior session so a demo → google transition (sign-in from the
+  // isolated demo) is detected deterministically.
+  const prevSessionRef = useRef(session)
+  useEffect(() => {
+    const prev = prevSessionRef.current
+    prevSessionRef.current = session
+    if (session !== 'google' || prev === 'google') return
+    // Whenever the session becomes google — direct from demo, via null after
+    // leaving the demo, or from signed-out — the live pages/metadata may still
+    // hold the demo journey (leaving demo keeps demo records live and never
+    // resets pages). Rebase the live state onto the REAL local journal so the
+    // cloud init/merge/save paths never publish demo content into the shared
+    // cloud journal (later demo edits are never re-carried). The adoption
+    // effect (below) is the ONLY legitimate way to carry demo content into the
+    // real journal, and it re-reads demoStorage directly, so this rebase does
+    // not disturb the eligible adoption path. A returning google user at
+    // startup already initializes pages from real storage, making this a
+    // content no-op for them.
+    //
+    // The undo/redo stacks also hold demo-content snapshots; clear them so a
+    // post-transition Ctrl+Z can never pop a demo snapshot and publish it to
+    // the real cloud via publishRestored (isDemo is already false by then). The
+    // pending debounced storage write (which captures a now-stale session in
+    // its closure) is cancelled so it can't write real content into demo
+    // records (or vice versa) after the transition.
+    if (storageTimerRef.current) {
+      clearTimeout(storageTimerRef.current)
+      storageTimerRef.current = null
+    }
+    initializedRef.current = false
+    const rebased = computeDemoToGoogleRebase({
+      loadRealPages: loadPagesFromStorage,
+      loadRealMetadata: loadMetadataFromStorage,
+      getDefaultPages,
+      getDefaultMetadata,
+      dedupe: deduplicatePageElements,
+      sanitize: sanitizePages,
+    })
+    pagesRef.current = rebased.pages
+    setPages(rebased.pages)
+    setAnniversaryDate(rebased.metadata.anniversaryDate)
+    setMilestones(rebased.metadata.milestones)
+    setOccasions(rebased.metadata.occasions)
+    setJourneyDetails(rebased.metadata.journeyDetails)
+    undoStackRef.current = []
+    redoStackRef.current = []
+    lastUndoPushRef.current = 0
+    lastUndoIdsRef.current = null
+    setUndoDepth(0)
+    setRedoDepth(0)
+  }, [session, setPages, setAnniversaryDate, setMilestones, setOccasions, setJourneyDetails])
+
   const pushUndoSnapshot = useCallback((force: boolean, affectedIds?: string[]) => {
     const now = Date.now()
     if (
@@ -577,11 +718,17 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     })
     const next = sanitizePages(withExtras)
     setPages(next)
+    if (isDemo) {
+      setDemoPages(next)
+      setSelectedElementId(null)
+      setSelectedElementIds([])
+      return
+    }
     savePagesToStorage(next)
     sync.savePages(deduplicatePageElements(next))
     setSelectedElementId(null)
     setSelectedElementIds([])
-  }, [sync])
+  }, [sync, isDemo])
 
   const undo = useCallback(() => {
     const snapshot = undoStackRef.current.pop()
@@ -619,18 +766,31 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       setPages(next)
       if (storageTimerRef.current) clearTimeout(storageTimerRef.current)
       storageTimerRef.current = setTimeout(() => {
-        savePagesToStorage(pagesRef.current)
+        // Gate on the CURRENT session (via ref), not the value captured when
+        // this timer was scheduled: the session may have switched (demo ↔
+        // google) during the debounce window, and writing the wrong store would
+        // leak real content into demo records (or demo content into the real
+        // journal).
+        if (isDemoRef.current) {
+          setDemoPages(pagesRef.current)
+        } else {
+          savePagesToStorage(pagesRef.current)
+        }
         storageTimerRef.current = null
       }, 2000)
-      if (syncEnabled) {
+      if (syncEnabled && !isDemo) {
         sync.savePages(next)
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sync.savePages, pushUndoSnapshot])
+    }, [sync.savePages, pushUndoSnapshot, isDemo])
 
   useEffect(() => {
     const persistNow = () => {
-      savePagesToStorage(pagesRef.current)
+      if (isDemoRef.current) {
+        setDemoPages(pagesRef.current)
+      } else {
+        savePagesToStorage(pagesRef.current)
+      }
     }
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') persistNow()
@@ -922,6 +1082,90 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     setOccasions(prev => prev.filter(o => o.id !== id))
   }, [])
 
+  // Enter the isolated demo journey. Replaces the old local anon session: a
+  // demo user must NEVER see or edit the real shared cloud journal, so all
+  // demo data lives only in demo-scoped localStorage (demoStorage) and sync is
+  // never enabled for the demo path.
+  const enterDemoMode = useCallback(() => {
+    // Isolation guard: a demo user must NEVER inherit the real journal. The
+    // pre-demo app once carried a legacy book (journal_pages, journal_metadata,
+    // journal_anon_uid) into the demo under `demo:migrated-legacy-once`; on a
+    // browser that had been used by a signed-in account those real keys held the
+    // authenticated user's private synced book. purgeLegacyMigratedDemo drops
+    // that carried-over copy once. New sessions never set the marker, so this
+    // only ever fires for affected legacy browsers.
+    purgeLegacyMigratedDemo()
+    // First run: seed the built-in sample content. A returning visitor restores
+    // their own demo-scoped records below. The demo never reads the real
+    // journal keys (journal_pages, journal_metadata, journal_anon_uid).
+    if (!hasDemoState()) {
+      setDemoPages(getDemoPagesSeed())
+      setDemoMetadata(getDemoMetadataSeed())
+    }
+    // Load the demo book + metadata into the LIVE state so the visitor edits
+    // real React state, not just demo storage.
+    const demoMeta = getDemoMetadata()
+    setAnniversaryDate(demoMeta.anniversaryDate ?? getDefaultMetadata().anniversaryDate)
+    setMilestones(demoMeta.milestones ?? getDefaultMetadata().milestones)
+    setOccasions(demoMeta.occasions ?? getDefaultMetadata().occasions)
+    setJourneyDetails(demoMeta.journeyDetails ?? getDefaultMetadata().journeyDetails)
+    setPages(deduplicatePageElements(sanitizePages(getDemoPages())))
+    setBookClosedState(getDemoBookClosed())
+    setCurrentPageIndex(getDemoBookClosed() ? 0 : 1)
+    setFocusPageIndexState(getDemoBookClosed() ? 0 : 1)
+    // Entering demo must not inherit undo/redo snapshots from a prior google
+    // session: Ctrl+Z in demo must never restore real-journal pages (which
+    // would leak real content into the isolated demo view).
+    undoStackRef.current = []
+    redoStackRef.current = []
+    lastUndoPushRef.current = 0
+    lastUndoIdsRef.current = null
+    setUndoDepth(0)
+    setRedoDepth(0)
+    setSession('demo')
+  }, [])
+
+  // FR-010/FR-011: adopt a demo journey into the real journal when the visitor
+  // signs in. Runs only when (a) the real book is still the shipped default
+  // template, (b) the CLOUD has actually been read (never while unknown), and
+  // (c) this account has not already consumed adoption — later demo edits are
+  // never re-carried. The intent flag survives the full-page redirect.
+  const demoAdoptedAccountsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!isGoogle) return
+    if (!fbAuthenticated || !firebaseUser?.uid) return
+    if (sync.loading || !sync.cloudChecked) return
+    if (!getAdoptionIntent()) return
+    const uid = firebaseUser.uid
+    if (demoAdoptedAccountsRef.current.has(uid)) return
+    demoAdoptedAccountsRef.current.add(uid)
+    // The intent is consumed exactly once: whether or not adoption is
+    // eligible, this sign-in round is settled.
+    clearAdoptionIntent()
+    if (hasAdoptedAccount(uid)) return
+    const real = pagesRef.current
+    if (real.length > 0 && !isDefaultTemplate(real)) return
+    const adoptedPages = deduplicatePageElements(sanitizePages(getDemoPages()))
+    const demoMeta = getDemoMetadata()
+    const meta: JournalMetadata = {
+      anniversaryDate: demoMeta.anniversaryDate ?? getDefaultMetadata().anniversaryDate,
+      milestones: demoMeta.milestones ?? getDefaultMetadata().milestones,
+      occasions: demoMeta.occasions ?? getDefaultMetadata().occasions,
+      journeyDetails: demoMeta.journeyDetails ?? getDefaultMetadata().journeyDetails,
+    }
+    setPages(adoptedPages)
+    setAnniversaryDate(meta.anniversaryDate)
+    setMilestones(meta.milestones)
+    setOccasions(meta.occasions)
+    setJourneyDetails(meta.journeyDetails)
+    savePagesToStorage(adoptedPages)
+    saveMetadataToStorage(meta)
+    sync.savePages(adoptedPages)
+    sync.saveMetadata(meta)
+    addAdoptedAccountId(uid)
+    toast.success('Your demo journey has been saved to your account.')
+  }, [isGoogle, fbAuthenticated, firebaseUser, sync, setPages, setAnniversaryDate, setMilestones, setOccasions, setJourneyDetails])
+
   const exportBackup = useCallback(async () => {
     const meta: JournalMetadata = {
       anniversaryDate,
@@ -978,7 +1222,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         selectedElementIds, setSelectedElementIds, batchUpdateElements,
         journeyDetails, setJourneyDetails,
         rightPanelWidth, setRightPanelWidth,
-        isAuthenticated, authLoading, authError, cloudLoading: isAuthenticated && sync.loading, signInWithGoogle, signInAnonymously, signOut,
+        isAuthenticated, isDemo, authLoading, authError, cloudLoading: isGoogle && sync.loading, signInWithGoogle, signInAnonymously: enterDemoMode, signOut,
         syncLoading, isConnected: sync.isConnected,
         syncLatency, syncPeakLatency,
         flushSync: () => { sync.savePages(deduplicatePageElements(sanitizePages(pagesRef.current))); sync.flushPages() },

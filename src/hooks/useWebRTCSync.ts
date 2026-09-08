@@ -230,7 +230,18 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
   }, [])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) {
+      // Disabled path (demo / signed out): no FirebaseSync or BroadcastChannel
+      // is ever constructed, so settling `loading: false` immediately prevents
+      // a forever-spinning cloud indicator. Stale cloud state from a previous
+      // google session is also cleared so it can never leak into demo UI.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- disabled path must settle immediately
+      setLoading(false)
+      setIsConnected(false)
+      setMetadata(null)
+      setRemoteCursors([])
+      return
+    }
 
     const bs = createSync(
       onIncomingPages,
@@ -252,6 +263,9 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
       onIncomingMetadata,
       onIncomingBCOp,
     )
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- re-entering the enabled path must show connecting
+    setLoading(true)
 
     syncRef.current = bs
     bs.start()

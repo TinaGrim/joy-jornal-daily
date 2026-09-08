@@ -11,7 +11,7 @@ import BookInterface from './components/BookInterface'
 import LeftSidebar from './components/LeftSidebar'
 import RightToolbar from './components/RightToolbar'
 import AuthScreen from './components/AuthScreen'
-import { Moon, Sun } from 'lucide-react'
+import { Moon, Sun, X } from 'lucide-react'
 
 function ThemeToggle() {
   const { theme, toggle } = useTheme()
@@ -27,12 +27,40 @@ function ThemeToggle() {
 }
 
 function SyncBadge() {
-  const { syncLatency, syncPeakLatency, isConnected } = useJournal()
+  const { syncLatency, syncPeakLatency, isConnected, isDemo } = useJournal()
+  if (isDemo) return null
   const color = !isConnected ? '#ef4444' : syncLatency > 500 ? '#ef4444' : syncLatency > 200 ? '#f59e0b' : syncLatency > 50 ? '#eab308' : '#22c55e'
   return (
     <div className="fixed top-3 right-12 md:top-4 md:right-14 z-50 flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/80 dark:bg-[#313244]/80 border border-[#e8dcc8] dark:border-[#45475a] text-[10px] font-mono text-[#8b7355] dark:text-[#cdd6f4] select-none" title={`Last: ${syncLatency}ms | Peak: ${syncPeakLatency}ms`}>
       <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
       <span>{isConnected ? `${syncLatency}ms` : 'off'}</span>
+    </div>
+  )
+}
+
+function DemoChip() {
+  const { isDemo, signInWithGoogle, signOut } = useJournal()
+  if (!isDemo) return null
+  return (
+    <div className="fixed top-3 right-24 md:top-4 md:right-[5.875rem] z-50 flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/80 dark:bg-[#313244]/80 border border-[#e8dcc8] dark:border-[#45475a] text-[#8b7355] dark:text-[#cdd6f4] select-none">
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#d97757' }} />
+      <span className="text-[10px] font-mono">Demo</span>
+      <button
+        type="button"
+        onClick={signInWithGoogle}
+        className="ml-0.5 px-2 py-0.5 rounded-full bg-[#d97757] text-white text-[10px] font-handwriting hover:bg-[#c97050] transition-colors cursor-pointer"
+        title="Save this demo journal to your Google account"
+      >
+        Sign in to save
+      </button>
+      <button
+        type="button"
+        onClick={signOut}
+        className="p-0.5 rounded hover:bg-[#f0e6d3] dark:hover:bg-[#45475a]/60 transition-colors cursor-pointer"
+        title="Leave the demo (your work stays on this device)"
+      >
+        <X className="w-3 h-3" />
+      </button>
     </div>
   )
 }
@@ -184,6 +212,7 @@ function JournalApp() {
         >
           <ThemeToggle />
           <SyncBadge />
+          <DemoChip />
         </motion.div>
 
         <motion.div

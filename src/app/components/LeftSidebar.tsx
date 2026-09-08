@@ -43,6 +43,7 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
     occasions, addOccasion, deleteOccasion,
     anniversaryDate, setAnniversaryDate,
     syncLoading,
+    isDemo,
   } = useJournal()
   const { theme } = useTheme()
   const isDark = theme === 'night'
@@ -114,12 +115,25 @@ export default function LeftSidebar({ open, onToggle }: LeftSidebarProps) {
             background: isDark ? '#1e1e2e' : 'linear-gradient(180deg, #ede2cb, #f0e6d3)',
             borderBottom: isDark ? '2px solid #313244' : '2px solid #e8dcc8',
           }}>
-            <div className="flex items-center gap-2">
-              <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
-              <span className={`text-lg font-handwriting tracking-wide ${isDark ? 'text-[#cdd6f4]' : 'text-[#8b7355]'}`}>Our Journey</span>
-              <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
+                <span className={`text-lg font-handwriting tracking-wide ${isDark ? 'text-[#cdd6f4]' : 'text-[#8b7355]'}`}>Our Journey</span>
+                <span className={`text-sm ${isDark ? 'text-[#6c7086]' : 'text-[#a89a8a]'}`}>{ORNAMENT}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {isDemo && (
+                  <span
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-[#e8dcc8] dark:border-[#45475a] text-[9px] font-mono text-[#8b7355] dark:text-[#cdd6f4] select-none"
+                    title="On this device only"
+                  >
+                    <span className="w-1 h-1 rounded-full" style={{ background: '#d97757' }} />
+                    Demo
+                  </span>
+                )}
+                <ExportButton />
+              </div>
             </div>
-            <ExportButton />
           </div>
           <div className="flex-1 overflow-y-auto px-5 pb-6 flex flex-col gap-6 pt-6">
 
