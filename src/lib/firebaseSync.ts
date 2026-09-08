@@ -4,10 +4,15 @@ import { setServerOffset } from '@/lib/journalClock'
 import type { Page } from '@/types/journal'
 import type { JournalMetadata, SyncOperation } from '@/lib/syncTypes'
 import { mergePageSnapshots } from '@/lib/mergePages'
+import { BACKUP_VERSION, normalizeCheckpointPayload, type RestoredJournal } from '@/lib/journalBackup'
 
 const BOOK_PATH = 'journal/shared'
 const PAGES_PATH = 'journal/v2/pages'
-const MAX_HISTORY = 50
+// Auto checkpoints now run on their own timer instead of riding on successful
+// writes, so an offline stretch or a failed save can no longer silently skip a
+// checkpoint. Cap is generous and Manual checkpoints are never pruned.
+const MAX_HISTORY = 200
+const AUTO_CHECKPOINT_MS = 60_000
 // Slots are only pruned when untouched for 30 days AND fully superseded by
 // the current book, so an origin's content is never silently dropped.
 const STALE_SLOT_MS = 30 * 24 * 60 * 60 * 1000
@@ -16,6 +21,14 @@ const DEVICE_ID_KEY = 'journal_device_id'
 export interface CheckpointInfo {
   id: string
   savedAt: number
+  label?: string
+}
+
+// A checkpoint mirrors the downloadable backup payload: pages plus the
+// metadata current at save time, so it restores (and downloads) like a backup.
+export interface CheckpointPayload {
+  pages: Page[]
+  metadata: JournalMetadata | null
   label?: string
 }
 
@@ -51,6 +64,16 @@ export class FirebaseSync {
   private retryBackoffMs = 1000
   private retryPages: Page[] | null = null
   private lastErrorNotified = 0
+  // Auto-checkpoint bookkeeping. dirtyVersion bumps on every successful cloud
+  // write; the timer saves when dirtyVersion is ahead of checkpointedVersion.
+  // The timestamp only ever advances on a SUCCESSFUL save, so a failed attempt
+  // is retried on the next tick instead of being "skipped" until 60s later.
+  private autoCheckpointTimer: ReturnType<typeof setInterval> | null = null
+  private dirtyVersion = 0
+  private checkpointedVersion = 0
+  private autoCheckpointInFlight = false
+  private latestPages: Page[] = []
+  private currentMetadata: JournalMetadata | null = null
 
   constructor(
     onPages: (pages: Page[]) => void,
@@ -83,6 +106,7 @@ export class FirebaseSync {
     const slots = [...this.v2Slots, ...(this.legacySlot ? [this.legacySlot] : [])]
     const merged = mergePageSnapshots(slots)
     this.pagesReceived = true
+    this.latestPages = merged
     this.onPages(merged)
   }
 
@@ -125,6 +149,7 @@ export class FirebaseSync {
     this.unsubMetadata = onValue(metaRef, (snap) => {
       if (this.writingMetadata) return
       const val = snap.val()
+      if (val && val.data) this.currentMetadata = val.data
       if (val && val._source !== this.deviceId && val.data) {
         this.onMetadata(val.data)
       }
@@ -151,6 +176,32 @@ export class FirebaseSync {
 
     this.probeServerTime()
     this.recoverPending()
+    this.autoCheckpointTimer = setInterval(() => { this.tickAutoCheckpoint() }, AUTO_CHECKPOINT_MS)
+  }
+
+  // Owns auto-checkpointing. Every tick: if the book changed since the last
+  // saved checkpoint AND at least AUTO_CHECKPOINT_MS has passed since the last
+  // successful one, save. On failure the dirty state is left intact so the next
+  // tick retries — a failed or offline save is never silently skipped.
+  private async tickAutoCheckpoint() {
+    if (!rtdb || !this.pagesReceived) return
+    if (this.dirtyVersion <= this.checkpointedVersion) return
+    if (this.autoCheckpointInFlight) return
+    if (Date.now() - this.lastAutoCheckpoint < AUTO_CHECKPOINT_MS) return
+    const version = this.dirtyVersion
+    const pages = this.latestPages
+    if (pages.length === 0) return
+    this.autoCheckpointInFlight = true
+    try {
+      await this.saveCheckpoint({ pages, metadata: this.currentMetadata, label: 'Auto' })
+      this.lastAutoCheckpoint = Date.now()
+      if (this.checkpointedVersion < version) this.checkpointedVersion = version
+    } catch (err) {
+      // Keep dirty — retry on the next tick.
+      console.warn('[FirebaseSync] auto checkpoint failed, will retry:', err)
+    } finally {
+      this.autoCheckpointInFlight = false
+    }
   }
 
   destroy() {
@@ -177,6 +228,10 @@ export class FirebaseSync {
     if (this.unsubConnection) {
       off(ref(rtdb!, '.info/connected'))
       this.unsubConnection = null
+    }
+    if (this.autoCheckpointTimer) {
+      clearInterval(this.autoCheckpointTimer)
+      this.autoCheckpointTimer = null
     }
     this.cancelRetryTimer()
   }
@@ -241,10 +296,11 @@ export class FirebaseSync {
       this.retryPages = null
       this.retryBackoffMs = 1000
       this.cancelRetryTimer()
-      if (Date.now() - this.lastAutoCheckpoint >= 60000) {
-        this.lastAutoCheckpoint = Date.now()
-        this.saveCheckpoint(pages, 'Auto').catch(() => {})
-      }
+      // Mark the book as having changed; the dedicated auto-checkpoint timer
+      // (see tickAutoCheckpoint) does the actual saving so failures are
+      // retried instead of skipped.
+      this.latestPages = pages
+      this.dirtyVersion += 1
       this.pruneStaleSlots(pages).catch(() => {})
     } catch {
       this.retryPages = pages
@@ -359,6 +415,7 @@ export class FirebaseSync {
 
   async broadcastMetadata(metadata: JournalMetadata) {
     if (!rtdb) return
+    this.currentMetadata = metadata
     this.writingMetadata = true
     try {
       const metaRef = ref(rtdb, `${BOOK_PATH}/metadata`)
@@ -377,28 +434,38 @@ export class FirebaseSync {
     } catch { /* ops are best-effort */ }
   }
 
-  async saveCheckpoint(pages: Page[], label?: string): Promise<void> {
+  async saveCheckpoint(payload: CheckpointPayload): Promise<void> {
+    // Failures PROPAGATE to the caller: the auto-checkpoint timer retries the
+    // same payload on its next tick, and manual saves surface a toast. (The
+    // old version swallowed errors, so a failed save silently disappeared.)
     if (!rtdb) return
-    try {
-      const stripped = pages.map(p => ({
-        ...p,
-        elements: p.elements.filter(el => !el.data?._deleted).map(el => {
-          const data = el.data as Record<string, unknown> | undefined
-          if (!data) return { ...el, data: {} }
-          const rest = { ...data }
-          delete rest._updatedAt
-          return { ...el, data: Object.keys(rest).length ? rest : data }
-        }),
-      }))
-      const historyMetaRef = ref(rtdb, `${BOOK_PATH}/history-meta`)
-      const pushResult = await push(historyMetaRef, { savedAt: Date.now(), label: label ?? null, _source: this.deviceId })
-      const id = pushResult.key!
-      const historyDataRef = ref(rtdb, `${BOOK_PATH}/history-data/${id}`)
-      await set(historyDataRef, { data: stripped })
-      this.pruneHistory().catch(() => {})
-    } catch (err) {
-      console.warn('[FirebaseSync] saveCheckpoint failed:', err)
+    const savedAt = Date.now()
+    const stripped = payload.pages.map(p => ({
+      ...p,
+      elements: p.elements.filter(el => !el.data?._deleted).map(el => {
+        const data = el.data as Record<string, unknown> | undefined
+        if (!data) return { ...el, data: {} }
+        const rest = { ...data }
+        delete rest._updatedAt
+        return { ...el, data: Object.keys(rest).length ? rest : data }
+      }),
+    }))
+    // The stored payload IS a backup: version + pages + metadata. A
+    // checkpoint therefore restores the whole journal and can be downloaded
+    // as a Restore-from-Backup file.
+    const backupPayload = {
+      version: BACKUP_VERSION,
+      exportedAt: new Date(savedAt).toISOString(),
+      savedAt,
+      pages: stripped,
+      metadata: payload.metadata,
     }
+    const historyMetaRef = ref(rtdb, `${BOOK_PATH}/history-meta`)
+    const pushResult = await push(historyMetaRef, { savedAt, label: payload.label ?? null, _source: this.deviceId })
+    const id = pushResult.key!
+    const historyDataRef = ref(rtdb, `${BOOK_PATH}/history-data/${id}`)
+    await set(historyDataRef, { data: backupPayload })
+    this.pruneHistory().catch(() => {})
   }
 
   async getHistory(): Promise<CheckpointInfo[]> {
@@ -422,15 +489,13 @@ export class FirebaseSync {
     }
   }
 
-  async loadCheckpoint(id: string): Promise<Page[] | null> {
+  async loadCheckpoint(id: string): Promise<RestoredJournal | null> {
     if (!rtdb) return null
     try {
       const snap = await get(ref(rtdb, `${BOOK_PATH}/history-data/${id}`))
       if (!snap.exists()) return null
-      const val = snap.val()
-      if (Array.isArray(val.data) && val.data.length > 0) {
-        return val.data
-      }
+      const normalized = normalizeCheckpointPayload(snap.val())
+      if (normalized && normalized.pages.length > 0) return normalized
     } catch {
       console.warn('[FirebaseSync] loadCheckpoint failed')
     }
@@ -499,19 +564,36 @@ export class FirebaseSync {
       const snap = await get(query(historyMetaRef, limitToLast(MAX_HISTORY + 1)))
       if (!snap.exists()) return
 
-      const entries: { key: string; savedAt: number }[] = []
+      const entries: { key: string; savedAt: number; label: string | null }[] = []
       snap.forEach((child) => {
         const val = child.val()
-        entries.push({ key: child.key!, savedAt: val.savedAt ?? 0 })
+        entries.push({ key: child.key!, savedAt: val.savedAt ?? 0, label: val.label ?? null })
       })
 
       if (entries.length <= MAX_HISTORY) return
 
       entries.sort((a, b) => a.savedAt - b.savedAt)
-      const toDelete = entries.slice(0, entries.length - MAX_HISTORY)
-      const deletes = toDelete.flatMap((entry) => [
-        set(ref(rtdb!, `${BOOK_PATH}/history-meta/${entry.key}`), null),
-        set(ref(rtdb!, `${BOOK_PATH}/history-data/${entry.key}`), null),
+
+      // Manual checkpoints are never pruned. Beyond the cap, only the oldest
+      // Auto checkpoints are removed (the auto-save now ticks reliably, so
+      // this is just space protection, not a way for saves to "go missing").
+      const excess = entries.length - MAX_HISTORY
+      const deleted = new Set<string>()
+      const autos = entries.filter(e => e.label === 'Auto')
+      for (let i = 0; i < excess && i < autos.length; i++) deleted.add(autos[i].key)
+      let stillNeed = excess - deleted.size
+      for (const entry of entries) {
+        if (stillNeed <= 0) break
+        if (!deleted.has(entry.key)) {
+          deleted.add(entry.key)
+          stillNeed -= 1
+        }
+      }
+      if (deleted.size === 0) return
+
+      const deletes = [...deleted].flatMap((key) => [
+        set(ref(rtdb!, `${BOOK_PATH}/history-meta/${key}`), null),
+        set(ref(rtdb!, `${BOOK_PATH}/history-data/${key}`), null),
       ])
       await Promise.all(deletes)
     } catch (err) {

@@ -4,6 +4,7 @@ import confetti from 'canvas-confetti'
 import type { CanvasElement, Page, User, Milestone, Occasion, DrawSettings, JourneyDetails, PagePattern } from '@/types/journal'
 import type { JournalMetadata } from '@/lib/syncTypes'
 import type { CheckpointInfo } from '@/lib/firebaseSync'
+import { buildBackup, downloadJson, type RestoredJournal } from '@/lib/journalBackup'
 import { mergePageSnapshots, collapseVisualDuplicates, ensureUniquePageIds, tombstoneExtrasForRestore } from '@/lib/mergePages'
 import { journalNow } from '@/lib/journalClock'
 import { useFirebaseAuth, friendlyAuthError } from '@/hooks/useFirebaseAuth'
@@ -28,8 +29,6 @@ import {
 } from '@/lib/demoStorage'
 import { computeDemoToGoogleRebase, liveStateBelongsToRealJournal, mayMergeCloudWithLiveState, type LiveJournalSource } from '@/lib/journalTransition'
 import { repairDemoMixedJournalPages, isDemoMetadata } from '@/lib/demoMixRepair'
-
-const BACKUP_VERSION = 1
 
 const STORAGE_KEY_PAGES = 'journal_pages'
 const STORAGE_KEY_METADATA = 'journal_metadata'
@@ -224,13 +223,14 @@ interface JournalContextType {
   canUndo: boolean
   canRedo: boolean
   saveCheckpoint: (label?: string) => Promise<void>
-  loadCheckpoint: (id: string) => Promise<Page[] | null>
+  loadCheckpoint: (id: string) => Promise<RestoredJournal | null>
   deleteCheckpoint: (id: string) => Promise<void>
   checkpoints: CheckpointInfo[]
   refreshCheckpoints: () => Promise<void>
   syncLatency: number
   syncPeakLatency: number
   exportBackup: () => Promise<void>
+  downloadCheckpoint: (id: string) => Promise<void>
   restoreBackup: (backup: { pages: Page[]; metadata: JournalMetadata }) => void
 }
 
@@ -341,27 +341,6 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshCheckpoints()
   }, [refreshCheckpoints])
-
-  const saveCheckpoint = useCallback(async (label?: string) => {
-    await sync.saveCheckpoint(sync.pages, label)
-    refreshCheckpoints()
-    toast.success('Checkpoint saved!')
-  }, [sync, refreshCheckpoints])
-
-  const loadCheckpoint = useCallback(async (id: string): Promise<Page[] | null> => {
-    const data = await sync.loadCheckpoint(id)
-    if (data) {
-      sync.savePages(data)
-      refreshCheckpoints()
-      toast.success('Checkpoint restored')
-    }
-    return data
-  }, [sync, refreshCheckpoints])
-
-  const deleteCheckpoint = useCallback(async (id: string) => {
-    await sync.deleteCheckpoint(id)
-    refreshCheckpoints()
-  }, [sync, refreshCheckpoints])
 
   const currentUser: User = {
     id: effectiveUser?.uid ?? 'local',
@@ -1246,43 +1225,33 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     toast.success('Your demo journey has been saved to your account.')
   }, [isGoogle, fbAuthenticated, firebaseUser, sync, setPages, setAnniversaryDate, setMilestones, setOccasions, setJourneyDetails])
 
+  // Snapshot of the metadata currently on screen; used to build the backup /
+  // checkpoint payloads (a checkpoint IS a backup, so it stores metadata too).
+  const currentJournalMetadata = useCallback((): JournalMetadata => ({
+    anniversaryDate,
+    milestones: milestones ?? [],
+    occasions: occasions ?? [],
+    journeyDetails,
+  }), [anniversaryDate, milestones, occasions, journeyDetails])
+
   const exportBackup = useCallback(async () => {
-    const meta: JournalMetadata = {
-      anniversaryDate,
-      milestones: milestones ?? [],
-      occasions: occasions ?? [],
-      journeyDetails,
-    }
     // Embedding every checkpoint duplicated the whole book per snapshot
     // (~10 MB for a ~200 KB journal). Only the newest checkpoint is embedded;
     // the full history stays in the cloud.
     const checkpointsList = await sync.getHistory()
     let latestCheckpoint: Page[] | null = null
     if (checkpointsList.length > 0) {
-      latestCheckpoint = await sync.loadCheckpoint(checkpointsList[0].id)
+      latestCheckpoint = (await sync.loadCheckpoint(checkpointsList[0].id))?.pages ?? null
     }
-    const backup = {
-      version: BACKUP_VERSION,
-      exportedAt: new Date().toISOString(),
-      pages: pagesRef.current,
-      metadata: meta,
+    const backup = buildBackup(pagesRef.current, currentJournalMetadata())
+    const backupOut = {
+      ...backup,
       checkpoint: latestCheckpoint,
       checkpointMeta: checkpointsList.slice(0, 1),
     }
-    // Minified: pretty-printing turned drawing strokes into hundreds of
-    // thousands of lines.
-    const json = JSON.stringify(backup)
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `journey-backup-${new Date().toISOString().slice(0, 10)}.json`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    downloadJson(backupOut, `journey-backup-${new Date().toISOString().slice(0, 10)}.json`)
     toast.success('Backup downloaded!')
-  }, [anniversaryDate, milestones, occasions, journeyDetails, sync.getHistory, sync.loadCheckpoint])
+  }, [sync.getHistory, sync.loadCheckpoint, currentJournalMetadata])
 
   // Restore the journal from an exported backup (the JSON produced by
   // exportBackup). The restored pages become the authoritative book for the
@@ -1291,17 +1260,15 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   // timestamp and tombstones anything currently live that isn't in the backup,
   // so the subsequent cloud merge cannot resurrect old/other content on top of
   // the restored book. Metadata is replaced and persisted the same way.
-  const restoreBackup = useCallback((backup: { pages: Page[]; metadata: JournalMetadata }) => {
-    if (!Array.isArray(backup?.pages) || !backup?.metadata) {
-      toast.error('Invalid backup file.')
-      return
-    }
-    const restored = deduplicatePageElements(sanitizePages(backup.pages))
+  // Apply a full-book snapshot (pages + metadata) through the safe restore
+  // path shared by "Restore from Backup" and checkpoint restores: dedupe,
+  // unique page ids, cloud-orphan tombstoning, and metadata replacement.
+  const applyRestoredBook = useCallback((backupPages: Page[], meta: JournalMetadata) => {
+    const restored = deduplicatePageElements(sanitizePages(backupPages))
     if (restored.length === 0) {
-      toast.error('Backup contains no pages.')
+      toast.error('Restore contains no pages.')
       return
     }
-    const meta = backup.metadata
     setAnniversaryDate(meta.anniversaryDate ?? getDefaultMetadata().anniversaryDate)
     setMilestones(meta.milestones ?? getDefaultMetadata().milestones)
     setOccasions(meta.occasions ?? getDefaultMetadata().occasions)
@@ -1319,8 +1286,64 @@ export function JournalProvider({ children }: { children: ReactNode }) {
       sync.saveMetadata(persisted)
     }
     publishRestored(restored)
-    toast.success('Book restored from backup.')
   }, [sync, publishRestored])
+
+  const restoreBackup = useCallback((backup: { pages: Page[]; metadata: JournalMetadata }) => {
+    if (!Array.isArray(backup?.pages) || !backup?.metadata) {
+      toast.error('Invalid backup file.')
+      return
+    }
+    applyRestoredBook(backup.pages, backup.metadata)
+    toast.success('Book restored from backup.')
+  }, [applyRestoredBook])
+
+  const saveCheckpoint = useCallback(async (label?: string) => {
+    // A checkpoint stores the same payload as a backup (pages + metadata), so
+    // it restores the whole journal and can be downloaded as a backup file.
+    try {
+      await sync.saveCheckpoint({ pages: sync.pages, metadata: currentJournalMetadata(), label })
+      refreshCheckpoints()
+      toast.success('Checkpoint saved!')
+    } catch (err) {
+      console.warn('[JournalContext] saveCheckpoint failed:', err)
+      toast.error('Checkpoint could not be saved.')
+    }
+  }, [sync, refreshCheckpoints, currentJournalMetadata])
+
+  const loadCheckpoint = useCallback(async (id: string): Promise<RestoredJournal | null> => {
+    const data = await sync.loadCheckpoint(id)
+    if (data && data.pages.length > 0) {
+      if (data.metadata) {
+        // Full-payload checkpoint: restore exactly like a backup (dedupe +
+        // renumber + cloud tombstoning + metadata).
+        applyRestoredBook(data.pages, data.metadata)
+      } else {
+        // Legacy checkpoint (pages only): restore the pages and keep the
+        // current metadata.
+        sync.savePages(data.pages)
+      }
+      refreshCheckpoints()
+      toast.success('Checkpoint restored')
+    }
+    return data
+  }, [sync, refreshCheckpoints, applyRestoredBook])
+
+  const downloadCheckpoint = useCallback(async (id: string) => {
+    const cp = await sync.loadCheckpoint(id)
+    if (!cp || cp.pages.length === 0) {
+      toast.error('Checkpoint could not be loaded.')
+      return
+    }
+    const meta = cp.metadata ?? currentJournalMetadata()
+    const date = new Date(cp.savedAt ?? Date.now())
+    downloadJson(buildBackup(cp.pages, meta, date.toISOString()), `journey-checkpoint-${date.toISOString().slice(0, 10)}.json`)
+    toast.success('Checkpoint downloaded!')
+  }, [sync.loadCheckpoint, currentJournalMetadata])
+
+  const deleteCheckpoint = useCallback(async (id: string) => {
+    await sync.deleteCheckpoint(id)
+    refreshCheckpoints()
+  }, [sync, refreshCheckpoints])
 
   return (
     <JournalContext.Provider
@@ -1348,7 +1371,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         canUndo: undoDepth > 0,
         canRedo: redoDepth > 0,
         saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints,
-        exportBackup, restoreBackup,
+        exportBackup, restoreBackup, downloadCheckpoint,
       }}
     >
       {children}

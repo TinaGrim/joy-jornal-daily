@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createSync, type BroadcastSync } from '@/lib/broadcastSync'
-import { createFirebaseSync, type FirebaseSync, type CheckpointInfo } from '@/lib/firebaseSync'
+import { createFirebaseSync, type FirebaseSync, type CheckpointInfo, type CheckpointPayload } from '@/lib/firebaseSync'
+import type { RestoredJournal } from '@/lib/journalBackup'
 import { isFirebaseReady } from '@/lib/firebase'
 import { journalNow } from '@/lib/journalClock'
 import type { Page, CanvasElement } from '@/types/journal'
@@ -32,9 +33,9 @@ interface UseWebRTCSyncReturn {
   metadata: JournalMetadata | null
   saveMetadata: (metadata: JournalMetadata) => void
   broadcastOperation: (operation: SyncOperation) => void
-  saveCheckpoint: (pages: Page[], label?: string) => Promise<void>
+  saveCheckpoint: (payload: CheckpointPayload) => Promise<void>
   getHistory: () => Promise<CheckpointInfo[]>
-  loadCheckpoint: (id: string) => Promise<Page[] | null>
+  loadCheckpoint: (id: string) => Promise<RestoredJournal | null>
   deleteCheckpoint: (id: string) => Promise<void>
   lastLatency: number
   peakLatency: number
@@ -366,15 +367,15 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
     fbSyncRef.current?.broadcastMetadata(newMetadata)
   }, [])
 
-  const saveCheckpoint = useCallback(async (cpPages: Page[], label?: string) => {
-    await fbSyncRef.current?.saveCheckpoint(cpPages, label)
+  const saveCheckpoint = useCallback(async (payload: CheckpointPayload) => {
+    await fbSyncRef.current?.saveCheckpoint(payload)
   }, [])
 
   const getHistory = useCallback(async (): Promise<CheckpointInfo[]> => {
     return fbSyncRef.current?.getHistory() ?? []
   }, [])
 
-  const loadCheckpoint = useCallback(async (id: string): Promise<Page[] | null> => {
+  const loadCheckpoint = useCallback(async (id: string): Promise<RestoredJournal | null> => {
     return fbSyncRef.current?.loadCheckpoint(id) ?? null
   }, [])
 

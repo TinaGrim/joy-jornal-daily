@@ -2,10 +2,10 @@ import { useState, useCallback } from 'react'
 import { useJournal } from '@/app/contexts/JournalContext'
 import { useTheme } from '../../contexts/ThemeContext'
 import { cn } from '@/lib/utils'
-import { Clock, RotateCcw, Save, Trash2, Check, Sparkles } from 'lucide-react'
+import { Clock, RotateCcw, Save, Trash2, Check, Sparkles, Download } from 'lucide-react'
 
 export default function HistoryPanel() {
-  const { saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints } = useJournal()
+  const { saveCheckpoint, loadCheckpoint, deleteCheckpoint, checkpoints, refreshCheckpoints, downloadCheckpoint } = useJournal()
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const { theme } = useTheme()
@@ -13,8 +13,11 @@ export default function HistoryPanel() {
 
   const handleSave = useCallback(async () => {
     setSaving(true)
-    await saveCheckpoint('Manual')
-    setSaving(false)
+    try {
+      await saveCheckpoint('Manual')
+    } finally {
+      setSaving(false)
+    }
   }, [saveCheckpoint])
 
   const handleRestore = useCallback(async (id: string) => {
@@ -33,6 +36,10 @@ export default function HistoryPanel() {
     await deleteCheckpoint(id)
     setConfirmDelete(null)
   }, [confirmDelete, deleteCheckpoint])
+
+  const handleDownload = useCallback(async (id: string) => {
+    await downloadCheckpoint(id)
+  }, [downloadCheckpoint])
 
   const formatDate = (ts: number) => {
     const d = new Date(ts)
@@ -87,6 +94,13 @@ export default function HistoryPanel() {
                   title="Restore this checkpoint"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => handleDownload(cp.id)}
+                  className="p-1.5 rounded-lg text-warm-brown hover:bg-warm-brown/10 transition-colors cursor-pointer"
+                  title="Download this checkpoint as a backup"
+                >
+                  <Download className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => handleDelete(cp.id)}
