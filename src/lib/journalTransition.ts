@@ -6,6 +6,41 @@ export interface JournalTransitionResult {
   metadata: JournalMetadata
 }
 
+/**
+ * Which content the LIVE pages state currently holds. The live state holds demo
+ * content in two windows that must never be merged into — or published as — the
+ * real journal:
+ *
+ * 1. while a demo session is active, and
+ * 2. during the brief session-flip commit after demo → google, BEFORE the
+ *    rebase effect swaps `pages` to the real journal (at that moment `isDemo`
+ *    is already `false` but the live state is still the demo book).
+ *
+ * Every real-journal cloud path (init/publish, merge, adoption, storage writes)
+ * must gate on this so stale demo content can never leak into the real journal.
+ */
+export type LiveJournalSource = 'demo' | 'real'
+
+/** True only when the live state genuinely belongs to the real journal. */
+export function liveStateBelongsToRealJournal(liveSource: LiveJournalSource): boolean {
+  return liveSource === 'real'
+}
+
+/**
+ * Eligibility for the cloud init/merge paths: the live state may only be merged
+ * with (or published as) the real journal when the session is initialized, not
+ * in demo mode, AND the live state is genuinely the real journal. The middle
+ * condition alone is NOT enough — during the demo→google flip `inDemo` is
+ * already false while `liveSource` is still 'demo'.
+ */
+export function mayMergeCloudWithLiveState(
+  initialized: boolean,
+  inDemo: boolean,
+  liveSource: LiveJournalSource,
+): boolean {
+  return initialized && !inDemo && liveSource === 'real'
+}
+
 export interface DemoToGoogleRebaseInput {
   loadRealPages: () => Page[] | null
   loadRealMetadata: () => JournalMetadata | null

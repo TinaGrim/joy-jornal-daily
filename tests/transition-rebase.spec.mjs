@@ -12,7 +12,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeDemoToGoogleRebase } from '../src/lib/journalTransition.ts'
+import { computeDemoToGoogleRebase, liveStateBelongsToRealJournal, mayMergeCloudWithLiveState } from '../src/lib/journalTransition.ts'
 
 const identity = (x) => x
 
@@ -61,4 +61,30 @@ test('rebase result flows through dedupe + sanitize', () => {
   assert.ok(out.pages.length === 1)
   assert.equal(dedupeCalls, 1)
   assert.equal(sanitizeCalls, 1)
+})
+
+// Regression guard for the "signed-in book mixed with the anonymous book" bug:
+// the cloud merge/init paths must never read the live state as the real journal
+// during (a) a demo session, or (b) the demo→google flip commit where `isDemo`
+// is already false but the live state still holds demo content.
+
+test('liveStateBelongsToRealJournal: only \"real\" counts as the real journal', () => {
+  assert.equal(liveStateBelongsToRealJournal('real'), true)
+  assert.equal(liveStateBelongsToRealJournal('demo'), false)
+})
+
+test('mayMergeCloudWithLiveState: blocks every window where live state is demo content', () => {
+  // Normal demo session.
+  assert.equal(mayMergeCloudWithLiveState(true, true, 'demo'), false)
+  // Demo→google flip commit: initialized=true, inDemo already false, but the
+  // live pages are STILL the demo book (rebase runs after merge) — must block.
+  assert.equal(mayMergeCloudWithLiveState(true, false, 'demo'), false)
+  // Uninitialized at startup, live state still demo — blocks.
+  assert.equal(mayMergeCloudWithLiveState(false, true, 'demo'), false)
+  assert.equal(mayMergeCloudWithLiveState(false, false, 'demo'), false)
+  // Genuine real-journal session: the only window that may merge/publish.
+  assert.equal(mayMergeCloudWithLiveState(true, false, 'real'), true)
+  // In demo mode the live source should be 'demo', so combination is blocked
+  // even if a stale ref said 'real' (defense in depth).
+  assert.equal(mayMergeCloudWithLiveState(true, true, 'real'), false)
 })

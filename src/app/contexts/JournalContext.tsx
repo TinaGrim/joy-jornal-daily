@@ -26,7 +26,12 @@ import {
   hasAdoptedAccount,
   addAdoptedAccountId,
 } from '@/lib/demoStorage'
-import { computeDemoToGoogleRebase } from '@/lib/journalTransition'
+import {
+  computeDemoToGoogleRebase,
+  liveStateBelongsToRealJournal,
+  mayMergeCloudWithLiveState,
+  type LiveJournalSource,
+} from '@/lib/journalTransition'
 
 const BACKUP_VERSION = 1
 
@@ -268,6 +273,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   const isGoogle = session === 'google'
   // A usable session: the book is editable in both google and demo modes.
   const isAuthenticated = session !== null
+  // Which content the LIVE pages state holds. During the demo→google flip
+  // commit this is 'demo' (the rebase effect runs after the merge/publish
+  // effects) while `isDemo` is already false — so the cloud paths MUST gate on
+  // this ref, never on `isDemo`/`isGoogle` alone, to avoid merging or publishing
+  // demo content into the real journal. The rebase effect flips this to 'real'
+  // in the same effect that swaps the live pages.
+  const liveJournalSourceRef = useRef<LiveJournalSource>(session === 'demo' ? 'demo' : 'real')
 
   const effectiveUser = fbAuthenticated
     ? firebaseUser
@@ -429,6 +441,13 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (sync.loading) {
       return
     }
+    // The live state must be the REAL journal before anything is read from it
+    // or published. During the session flips above and the change captured in
+    // liveJournalSourceRef, pagesRef may still hold demo content even though
+    // isDemo is already false — never publish that into the real cloud.
+    if (!liveStateBelongsToRealJournal(liveJournalSourceRef.current)) {
+      return
+    }
 
     // Only publish local pages once Firebase has confirmed the cloud is
     // actually empty (cloudChecked). After the 10s offline fallback the
@@ -457,8 +476,14 @@ export function JournalProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated, sync.loading, sync.cloudChecked])
 
   useEffect(() => {
-    if (!initializedRef.current) return
-    if (isDemo) return
+    // Cloud merge is only legitimate when the live state is the REAL journal.
+    // During the demo→google flip commit this is false even though isDemo is
+    // already false: the live pages still hold demo content and the rebase
+    // effect runs afterwards. Without this guard a stale cloud snapshot
+    // (surviving sign-out because the disabled sync path never cleared it) is
+    // merged with demo content and persisted/published as the real book — the
+    // "sign-in book mixed with the anonymous book" bug.
+    if (!mayMergeCloudWithLiveState(initializedRef.current, isDemo, liveJournalSourceRef.current)) return
     if (sync.pages.length === 0) return
     const incoming = deduplicatePageElements(sanitizePages(sync.pages))
     const local = deduplicatePageElements(sanitizePages(pagesRef.current))
@@ -665,6 +690,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     })
     pagesRef.current = rebased.pages
     setPages(rebased.pages)
+    // The live state is now the real journal; every cloud path may read it.
+    liveJournalSourceRef.current = 'real'
     setAnniversaryDate(rebased.metadata.anniversaryDate)
     setMilestones(rebased.metadata.milestones)
     setOccasions(rebased.metadata.occasions)
@@ -770,8 +797,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
         // this timer was scheduled: the session may have switched (demo ↔
         // google) during the debounce window, and writing the wrong store would
         // leak real content into demo records (or demo content into the real
-        // journal).
-        if (isDemoRef.current) {
+        // journal). The live-source check covers the brief flip window where
+        // isDemo is already false but the state is still the demo book.
+        if (isDemoRef.current || !liveStateBelongsToRealJournal(liveJournalSourceRef.current)) {
           setDemoPages(pagesRef.current)
         } else {
           savePagesToStorage(pagesRef.current)
@@ -786,7 +814,7 @@ export function JournalProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const persistNow = () => {
-      if (isDemoRef.current) {
+      if (isDemoRef.current || !liveStateBelongsToRealJournal(liveJournalSourceRef.current)) {
         setDemoPages(pagesRef.current)
       } else {
         savePagesToStorage(pagesRef.current)
@@ -1122,6 +1150,8 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     lastUndoIdsRef.current = null
     setUndoDepth(0)
     setRedoDepth(0)
+    // From now on the live state is the demo book.
+    liveJournalSourceRef.current = 'demo'
     setSession('demo')
   }, [])
 
@@ -1135,6 +1165,9 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     if (!isGoogle) return
     if (!fbAuthenticated || !firebaseUser?.uid) return
     if (sync.loading || !sync.cloudChecked) return
+    // The live state must be the real journal before adoption inspects it as
+    // "the real book" (and before demo pages are written to the real store).
+    if (!liveStateBelongsToRealJournal(liveJournalSourceRef.current)) return
     if (!getAdoptionIntent()) return
     const uid = firebaseUser.uid
     if (demoAdoptedAccountsRef.current.has(uid)) return
@@ -1143,6 +1176,10 @@ export function JournalProvider({ children }: { children: ReactNode }) {
     // eligible, this sign-in round is settled.
     clearAdoptionIntent()
     if (hasAdoptedAccount(uid)) return
+    // Never overwrite a non-empty cloud book (e.g. a real journal created on
+    // another device) with demo content — adoption only ever applies when the
+    // cloud slot is genuinely empty.
+    if (sync.pages.length > 0) return
     const real = pagesRef.current
     if (real.length > 0 && !isDefaultTemplate(real)) return
     const adoptedPages = deduplicatePageElements(sanitizePages(getDemoPages()))

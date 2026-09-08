@@ -234,12 +234,20 @@ export function useWebRTCSync(enabled: boolean, onSyncError?: (message: string) 
       // Disabled path (demo / signed out): no FirebaseSync or BroadcastChannel
       // is ever constructed, so settling `loading: false` immediately prevents
       // a forever-spinning cloud indicator. Stale cloud state from a previous
-      // google session is also cleared so it can never leak into demo UI.
+      // google session is also cleared so it can never leak into demo UI — and
+      // so a later demo→google re-entry can never merge the OLD cloud snapshot
+      // against a live demo book (the page/source-mixing bug).
       // eslint-disable-next-line react-hooks/set-state-in-effect -- disabled path must settle immediately
       setLoading(false)
       setIsConnected(false)
       setMetadata(null)
       setRemoteCursors([])
+      setCloudChecked(false)
+      firstCloudDataRef.current = false
+      if (pagesRef.current.length > 0) {
+        setPages([])
+        pagesRef.current = []
+      }
       return
     }
 
